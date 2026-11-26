@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "channelscout"
+version = "0.1.0"
+description = "Scheduled YouTube discovery and reviewed outreach"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.13,<5",
+  "google-auth[requests]>=2.40,<3",
+  "httpx>=0.28,<1",
+  "langgraph>=1,<2",
+  "psycopg[binary]>=3.3,<4",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+channel-scout = "channel_scout.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["postgres: uses a disposable schema on a configured PostgreSQL instance"]

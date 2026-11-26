@@ -1,0 +1,2 @@
+[console_scripts]
+channel-scout = channel_scout.cli:main
