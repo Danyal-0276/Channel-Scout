@@ -35,6 +35,20 @@ def upsert_row(sheets, tab, end, index, row):
         raise ApiError("sheets", "projection_verification_failed")
 
 
+def append_leads(sheets, leads):
+    if not leads:
+        return
+    response = sheets.append("'Leads'!A:W", [lead_row(lead) for lead in leads])
+    updated_range = response.get("updates", {}).get("updatedRange", "")
+    first = updated_range.rsplit("!", 1)[-1].split(":", 1)[0].removeprefix("A")
+    if not first.isdecimal():
+        raise ApiError("sheets", "append_result_unclear")
+    last = int(first) + len(leads) - 1
+    expected = [[lead["id"]] for lead in leads]
+    if sheets.rows(f"'Leads'!A{first}:A{last}") != expected:
+        raise ApiError("sheets", "projection_verification_failed")
+
+
 def lead_row(lead):
     data = lead["metadata"]
     matches = lead["matches"]
@@ -68,11 +82,24 @@ def sync_sheets(db, sheets, limit, report):
     if leads != [LEAD_HEADERS] or runs != [RUN_HEADERS]:
         raise ApiError("sheets", "run_setup_sheets_or_repair_headers")
     lead_index = row_index(sheets.rows("'Leads'!A2:W"))
-    for lead in db.pending_channels(limit):
-        # Persist an exclusion in the Sheet only if the channel already had a lead row.
-        if lead["selection"] != "Excluded" or lead["id"] in lead_index:
-            upsert_row(sheets, "Leads", "W", lead_index, lead_row(lead))
-            report["leads_synced"] = report.get("leads_synced", 0) + 1
+    pending = db.pending_channels(limit)
+    new_leads = [lead for lead in pending if lead["id"] not in lead_index and lead["selection"] != "Excluded"]
+    existing = [lead for lead in pending if lead["id"] in lead_index]
+    append_leads(sheets, new_leads)
+    if existing:
+        check_index = row_index(sheets.rows("'Leads'!A2:A"))
+        if any(check_index.get(lead["id"]) != lead_index[lead["id"]] for lead in existing):
+            raise ApiError("sheets", "row_moved_during_sync")
+        updates = []
+        for lead in existing:
+            index = lead_index[lead["id"]]
+            updates.append({"range": f"'Leads'!A{index}:W{index}", "values": [lead_row(lead)]})
+        sheets.put_batch(updates)
+        check_index = row_index(sheets.rows("'Leads'!A2:A"))
+        if any(check_index.get(lead["id"]) != lead_index[lead["id"]] for lead in existing):
+            raise ApiError("sheets", "projection_verification_failed")
+    report["leads_synced"] = len(new_leads) + len(existing)
+    for lead in pending:
         db.acknowledge_channel(lead["id"], lead["sheet_revision"])
     run_index = row_index(sheets.rows("'Run Log'!A2:M"))
     for run in db.pending_runs(limit):

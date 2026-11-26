@@ -190,6 +190,10 @@ class Sheets:
                        attempts=1, headers=self.token.headers(),
                        params={"valueInputOption": "RAW", "insertDataOption": "OVERWRITE"}, json={"values": values})
 
+    def put_batch(self, rows):
+        return request(self.client, "sheets", "POST", f"{self.url}/values:batchUpdate",
+                       attempts=1, headers=self.token.headers(), json={"valueInputOption": "RAW", "data": rows})
+
     def metadata(self):
         return request(self.client, "sheets", "GET", self.url, headers=self.token.headers(),
                        params={"fields": "sheets(properties(sheetId,title),protectedRanges(range,warningOnly,requestingUserCanEdit,unprotectedRanges))"})
@@ -212,7 +216,8 @@ class Sheets:
         item = items[0]
         sheet_id = item["properties"]["sheetId"]
         protected = any(
-            protection.get("requestingUserCanEdit") is False
+            # Sheets omits the output-only flag when the requesting user cannot edit.
+            protection.get("requestingUserCanEdit", False) is False
             and not protection.get("warningOnly")
             and not protection.get("unprotectedRanges")
             and protection.get("range", {}).get("sheetId") == sheet_id

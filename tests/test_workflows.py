@@ -181,6 +181,14 @@ def test_approval_protection_covers_future_rows(range_info, exceptions, allowed)
             sheets.verified_approvals()
 
 
+def test_sheets_service_account_response_omits_false_edit_permission():
+    sheets = Sheets(None, "test-id", None)
+    sheets.metadata = lambda: {"sheets": [{"properties": {"title": "Approvals", "sheetId": 7},
+        "protectedRanges": [{"range": {"sheetId": 7}}]}]}
+    sheets.rows = lambda *_args, **_kwargs: [["Draft ID", "Review Token", "Decision", "Eligibility Evidence"]]
+    assert sheets.verified_approvals() == []
+
+
 def test_revocation_conflict_and_formula_approvals_are_blocked():
     identifiers = [uuid4() for _ in range(3)]
     one, two, three = map(str, identifiers)

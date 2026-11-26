@@ -105,22 +105,29 @@ class SheetFixture:
         if ":" not in cells:
             rows = self.tabs[tab][start-1:start]
             return [row[:1] for row in rows]
-        if cells.split(":")[1].endswith("1"):
-            return self.tabs[tab][:1]
-        return self.tabs[tab][start-1:]
+        end = cells.split(":")[1]
+        stop = int("".join(x for x in end if x.isdecimal()) or len(self.tabs[tab]))
+        if end.startswith("A"):
+            return [row[:1] for row in self.tabs[tab][start-1:stop]]
+        return self.tabs[tab][start-1:stop]
 
     def put(self, address, values):
         tab, cells = address.replace("'", "").split("!")
         index = int("".join(x for x in cells.split(":")[0] if x.isdecimal())) - 1
         self.tabs[tab][index] = values[0]
 
+    def put_batch(self, rows):
+        for row in rows:
+            self.put(row["range"], row["values"])
+
     def append(self, address, values):
         tab, _ = address.replace("'", "").split("!")
+        first = len(self.tabs[tab]) + 1
         self.tabs[tab].extend(values)
         if self.fail_append:
             self.fail_append = False
             raise ApiError("sheets", "network_error")
-        return {"updates": {"updatedRange": f"'{tab}'!A{len(self.tabs[tab])}:W{len(self.tabs[tab])}"}}
+        return {"updates": {"updatedRange": f"'{tab}'!A{first}:W{len(self.tabs[tab])}"}}
 
 
 class YouTubeFixture:

@@ -14,6 +14,8 @@ from .integrations import ApiError
 class Database:
     def __init__(self, parameters):
         self.conn = psycopg.connect(**parameters, autocommit=True, row_factory=dict_row)
+        schema = self.execute("SELECT current_schema() AS name").fetchone()["name"]
+        self.lock_prefix = f"channelscout:{schema}:"
 
     def __enter__(self):
         return self
@@ -24,9 +26,12 @@ class Database:
     def execute(self, query, values=()):
         return self.conn.execute(query, values)
 
+    def lock_transaction(self, name):
+        self.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (self.lock_prefix + name,))
+
     def migrate(self, paths):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:migrate'))")
+            self.lock_transaction("migrate")
             self.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)")
             for path in sorted(paths):
                 if not self.execute("SELECT 1 FROM schema_migrations WHERE name=%s", (path.name,)).fetchone():
@@ -35,7 +40,7 @@ class Database:
 
     @contextmanager
     def job(self, name):
-        key = f"channelscout:{name}"
+        key = self.lock_prefix + name
         locked = self.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (key,)).fetchone()["locked"]
         if not locked:
             raise ApiError("scheduler", "job_already_running")
@@ -197,12 +202,12 @@ class Database:
 
     def enable_sender(self, enabled):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.lock_transaction("delivery")
             self.execute("UPDATE sender_control SET paused=%s WHERE singleton", (not enabled,))
 
     def import_approvals(self, approvals):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.lock_transaction("delivery")
             self.execute("UPDATE approvals SET revoked_at=now() WHERE revoked_at IS NULL AND NOT (draft_id=ANY(%s))",
                          (list(approvals),))
             for draft_id, decision in approvals.items():
@@ -236,7 +241,7 @@ class Database:
 
     def claim(self, draft_id, days, cap):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.lock_transaction("delivery")
             if self.execute("SELECT paused FROM sender_control WHERE singleton").fetchone()["paused"]:
                 return None
             self.execute("""SELECT c.id FROM channels c JOIN drafts d ON d.channel_id=c.id
@@ -277,7 +282,7 @@ class Database:
 
     def resolve_send(self, draft_id, gmail_id):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.lock_transaction("delivery")
             row = self.execute(
                 """UPDATE send_attempts SET status=%s,gmail_id=%s,reason='reconciled_by_operator',finished_at=now()
                    WHERE draft_id=%s AND status='Needs Review' RETURNING channel_id""",
@@ -289,6 +294,6 @@ class Database:
 
     def suppress(self, recipient):
         with self.conn.transaction():
-            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.lock_transaction("delivery")
             self.execute("INSERT INTO suppressions (normalized_recipient) VALUES (%s) ON CONFLICT DO NOTHING",
                          (recipient,))
