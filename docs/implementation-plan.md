@@ -1,5 +1,7 @@
 # ChannelScout implementation plan
 
+Use the [production architecture](production-architecture.md) for job contracts, release gates, and the final approval and retry design.
+
 ## 1. Project structure
 
 | Planned file | Responsibility |
@@ -57,7 +59,7 @@ Use PostgreSQL constraints for uniqueness and foreign keys. Claim the send in a 
 - Confirm access to local PostgreSQL and apply the first versioned migration. Configure the PostgreSQL application login and Google Sheets service account.
 - Create the `Keywords`, `Leads`, and `Run Log` tabs. Use the channel ID to update Sheet rows even after a sort.
 - Build the discovery graph. Search up to three 50-result pages per keyword. Keep reported subscriber counts from 1,000 to 1,000,000 inclusive. Exclude known IN, PK, and BD country values, keep missing countries, and flag hidden counts for review.
-- Check public uploads in the last 90 days. Skip zero uploads and flag 1–3 as slow. Confirm how Shorts and livestreams count. Refresh or expire cached YouTube data and verify policy treatment of the displayed activity label.
+- Check public upload dates. The intended 90-day rule skips zero uploads and flags 1–3 as slow. Confirm which formats count and clear the policy treatment before enabling the calculated production filter or label. Refresh or expire cached YouTube data.
 - Run the same sample keywords twice. Verify one lead per channel, all keyword matches, and a recorded quota and error summary. [YouTube API policies](https://developers.google.com/youtube/terms/developer-policies)
 
 ### Phase 2 — Contact enrichment and drafts

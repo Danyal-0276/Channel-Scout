@@ -13,7 +13,8 @@ Channel-Scout/
 ├── .gitignore
 ├── README.md
 ├── docs/
-│   └── implementation-plan.md
+│   ├── implementation-plan.md
+│   └── production-architecture.md
 ├── migrations/            # Versioned PostgreSQL schema changes
 ├── src/
 │   └── channel_scout/      # Python application and LangGraph workflows
@@ -37,4 +38,6 @@ createdb -h 127.0.0.1 -p 5432 -U postgres -W channel_scout
 ```
 
 [Open the implementation plan](docs/implementation-plan.md).
+
+[Open the production architecture, guardrails, and eval plan](docs/production-architecture.md).
 
