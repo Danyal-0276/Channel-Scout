@@ -215,7 +215,11 @@ class Sheets:
             protection.get("requestingUserCanEdit") is False
             and not protection.get("warningOnly")
             and not protection.get("unprotectedRanges")
-            and protection.get("range") == {"sheetId": sheet_id}
+            and protection.get("range", {}).get("sheetId") == sheet_id
+            and protection["range"].get("startRowIndex", 0) == 0
+            and protection["range"].get("startColumnIndex", 0) == 0
+            and "endRowIndex" not in protection["range"]
+            and "endColumnIndex" not in protection["range"]
             for protection in item.get("protectedRanges", [])
         )
         if not protected:
@@ -328,8 +332,9 @@ class Gmail:
         message["Date"] = formatdate(usegmt=True)
         message.set_content(draft["body"])
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        sender_id = quote(self.sender, safe="")
         response = request(
-            self.client, "gmail", "POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            self.client, "gmail", "POST", f"https://gmail.googleapis.com/gmail/v1/users/{sender_id}/messages/send",
             attempts=1, headers=headers, json={"raw": raw},
         )
         return response.get("id")

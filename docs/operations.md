@@ -51,6 +51,13 @@ The registration script does not register the sender. Run and verify sender dry-
 
 For a reviewed edit, run `revise-draft <channel-id> <reviewed-json-file>`. Use JSON fields `status` set to `draft`, `subject`, `body`, and `evidence_ids` from the current evidence. The revision uses the currently verified contact and publishes a new approval token on the next sync.
 
+To obtain Gmail OAuth credentials, download a **Desktop app** OAuth client JSON from your Google Cloud project. Then run the interactive helper and authorize the correct sending mailbox when Google opens. This only configures OAuth. The DB switch and dry-run remain in their current states.
+
+```powershell
+& $scoutPython -m pip install -e '.[gmail-setup]'
+& $scoutPython scripts\configure_gmail.py 'C:\path\to\desktop-oauth-client.json' --sender 'you@example.com'
+```
+
 ```powershell
 & $scoutPython -m channel_scout.cli send-approved
 & $scoutPython -m channel_scout.cli sender-pause

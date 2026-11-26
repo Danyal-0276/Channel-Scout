@@ -132,12 +132,12 @@ def scheduled(args, db, settings, client):
         with db.job(command) as report:
             sync_sheets(db, sheets_client(settings, client), limit, report)
     else:
-        sheets = sheets_client(settings, client)
         live = args.live
+        if live and settings.flag("OUTREACH_DRY_RUN", True):
+            raise ConfigError("Live sending is disabled by OUTREACH_DRY_RUN")
+        sheets = sheets_client(settings, client)
         gmail = None
         if live:
-            if settings.flag("OUTREACH_DRY_RUN", True):
-                raise ConfigError("Live sending is disabled by OUTREACH_DRY_RUN")
             admin = db.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()["rolsuper"]
             if admin:
                 raise ConfigError("Live sending requires a restricted PostgreSQL role")

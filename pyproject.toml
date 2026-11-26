@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+gmail-setup = ["google-auth-oauthlib>=1.2,<2"]
 
 [project.scripts]
 channel-scout = "channel_scout.cli:main"

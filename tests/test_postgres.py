@@ -7,13 +7,15 @@ from uuid import uuid4
 import psycopg
 import pytest
 from psycopg import sql
+from types import SimpleNamespace
 
 from channel_scout.config import Settings
 from channel_scout.db import Database
 from channel_scout.domain import DraftOutput
 from channel_scout.integrations import ApiError, LEAD_HEADERS, RUN_HEADERS
+from channel_scout.outreach import run_sender
 from channel_scout.sheets_sync import sync_sheets
-from channel_scout.workflows import run_discovery
+from channel_scout.workflows import run_discovery, run_drafting
 
 
 @pytest.fixture
@@ -92,6 +94,10 @@ class SheetFixture:
         self.tabs = {"Keywords": [["Niche", "Keyword", "Enabled"], ["Finance", "Podcast", True]],
                      "Leads": [LEAD_HEADERS], "Run Log": [RUN_HEADERS]}
         self.fail_append = False
+        self.approvals = []
+
+    def verified_approvals(self):
+        return self.approvals
 
     def rows(self, address):
         tab, cells = address.replace("'", "").split("!")
@@ -123,7 +129,10 @@ class YouTubeFixture:
         return {"UC" + "C"*22: None}, 1
 
     def channels(self, ids):
-        return [{"id": ids[0], "snippet": {"title": "Finance Talk"}, "statistics": {"subscriberCount": "2000"}}]
+        return [{"id": ids[0], "snippet": {"title": "Finance Talk",
+                 "description": "We interview independent financial planners about retirement planning.\n"
+                                "For business inquiries: booking@example.com"},
+                 "statistics": {"subscriberCount": "2000"}}]
 
 
 @pytest.mark.postgres
@@ -152,3 +161,49 @@ def test_quota_bucket_blocks_at_configured_cap(postgres):
     with pytest.raises(ApiError, match="daily_quota"):
         db.reserve("search", 1)
     db.reserve("general", 1)
+
+
+@pytest.mark.postgres
+def test_full_workflow_requires_matching_approval_and_keeps_uncertainty(postgres):
+    db, _ = postgres
+    sheet = SheetFixture()
+    with db.job("discover") as report:
+        run_discovery(db, sheet, YouTubeFixture(), False, 10, report)
+    gateway = SimpleNamespace(
+        provider="fixture", model="stub",
+        draft=lambda *args: DraftOutput(
+            status="draft", subject="An editing sample", body="Would an editing sample help your interview series?",
+            evidence_ids=["source-1"],
+        ).model_dump_json(),
+    )
+    with db.job("draft") as report:
+        run_drafting(db, gateway, None, "Podcast audio editing", set(), 10, report)
+    assert report["drafts_created"] == 1
+    sync_sheets(db, sheet, 10, {})
+    displayed = dict(zip(LEAD_HEADERS, sheet.tabs["Leads"][1]))
+    assert displayed["Contact Email"] == "booking@example.com"
+    assert displayed["Outreach Status"] == "Pending Approval"
+    db.enable_sender(True)
+    requests = []
+
+    def timeout(*args):
+        requests.append(args)
+        raise ApiError("gmail", "network_error", True)
+
+    fake_gmail = SimpleNamespace(token=SimpleNamespace(headers=lambda: {}), submit=timeout)
+    run_sender(db, sheet, fake_gmail, True, 5, 7, {})
+    assert requests == []
+    sheet.approvals.append([displayed["Draft ID"], displayed["Review Token"], "Approve", "Synthetic opt-in"])
+    original_subject = sheet.tabs["Leads"][1][18]
+    sheet.tabs["Leads"][1][18] = "Unexpected edit after approval"
+    run_sender(db, sheet, fake_gmail, True, 5, 7, {})
+    assert requests == []
+    sheet.tabs["Leads"][1][18] = original_subject
+    run_sender(db, sheet, fake_gmail, False, 5, 7, {})
+    assert requests == []
+    run_sender(db, sheet, fake_gmail, True, 5, 7, {})
+    run_sender(db, sheet, fake_gmail, True, 5, 7, {})
+    sync_sheets(db, sheet, 10, {})
+    assert len(requests) == 1
+    assert requests[0][0]["subject"] == original_subject
+    assert sheet.tabs["Leads"][1][17] == "Needs Review"

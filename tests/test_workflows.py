@@ -1,6 +1,9 @@
+import base64
 import json
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
+from email import policy
+from email.parser import BytesParser
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -8,7 +11,7 @@ import httpx
 import pytest
 
 from channel_scout.domain import classify, classify_activity, parse_keywords, validate_draft
-from channel_scout.integrations import ApiError, LEAD_HEADERS, Model, Sheets, YouTube, public_contact_urls
+from channel_scout.integrations import ApiError, Gmail, LEAD_HEADERS, Model, Sheets, YouTube, public_contact_urls
 from channel_scout.outreach import decisions, run_sender
 from channel_scout.sheets_sync import row_index, upsert_row
 from channel_scout.workflows import discovery_graph, drafting_graph
@@ -160,6 +163,24 @@ def test_protection_is_required_before_approval_reads():
         sheets.verified_approvals()
 
 
+@pytest.mark.parametrize("range_info,exceptions,allowed", [
+    ({"sheetId": 7}, [], True),
+    ({"sheetId": 7, "startRowIndex": 0, "startColumnIndex": 0}, [], True),
+    ({"sheetId": 7, "endRowIndex": 1000}, [], False),
+    ({"sheetId": 7}, [{"sheetId": 7, "startRowIndex": 1, "endRowIndex": 2}], False),
+])
+def test_approval_protection_covers_future_rows(range_info, exceptions, allowed):
+    sheets = Sheets(None, "test-id", None)
+    sheets.metadata = lambda: {"sheets": [{"properties": {"title": "Approvals", "sheetId": 7},
+        "protectedRanges": [{"range": range_info, "requestingUserCanEdit": False, "unprotectedRanges": exceptions}]}]}
+    sheets.rows = lambda *_args, **_kwargs: [["Draft ID", "Review Token", "Decision", "Eligibility Evidence"]]
+    if allowed:
+        assert sheets.verified_approvals() == []
+    else:
+        with pytest.raises(ApiError, match="approval_tab_not_protected"):
+            sheets.verified_approvals()
+
+
 def test_revocation_conflict_and_formula_approvals_are_blocked():
     identifiers = [uuid4() for _ in range(3)]
     one, two, three = map(str, identifiers)
@@ -207,3 +228,21 @@ def test_sync_refuses_a_moved_or_duplicated_row():
     sheets = SimpleNamespace(rows=lambda _: [["different-id"]])
     with pytest.raises(ApiError, match="row_moved"):
         upsert_row(sheets, "Leads", "W", {"row": 2}, ["row", "payload"])
+
+
+def test_gmail_submission_is_bound_to_configured_sender_and_approved_mime():
+    def handle(request):
+        assert "/users/sender%40example.com/messages/send" in str(request.url)
+        raw = base64.urlsafe_b64decode(json.loads(request.content)["raw"])
+        mail = BytesParser(policy=policy.default).parsebytes(raw)
+        assert str(mail["To"]) == "receiver@example.com"
+        assert str(mail["From"]) == "sender@example.com"
+        assert str(mail["Subject"]) == "Reviewed subject"
+        assert mail.get_content().strip() == "Reviewed body"
+        assert mail["Cc"] is None and mail["Bcc"] is None
+        return httpx.Response(200, json={"id": "fixture-id"})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        gateway = Gmail(client, None, "sender@example.com")
+        draft = {"recipient": "receiver@example.com", "subject": "Reviewed subject", "body": "Reviewed body"}
+        assert gateway.submit(draft, "<stable@example.com>", {}) == "fixture-id"
