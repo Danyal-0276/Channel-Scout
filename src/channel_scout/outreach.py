@@ -56,13 +56,17 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
     candidates = decisions(sheets.verified_approvals())
     db.import_approvals(candidates)
     report["approved_rows"] = len(candidates)
-    for draft_id, decision in list(candidates.items())[:cap]:
+    actions = 0
+    for draft_id, decision in candidates.items():
+        if actions >= cap:
+            break
         draft = db.eligible(draft_id, days)
         if not draft or not reviewed_snapshot(sheets, draft, decision):
             report["blocked"] = report.get("blocked", 0) + 1
             continue
         report["eligible"] = report.get("eligible", 0) + 1
         if not live:
+            actions += 1
             continue
         # Resolve OAuth before claiming so failure to authenticate can't consume a send slot.
         headers = gmail.token.headers()
@@ -75,6 +79,7 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
         if not claim:
             report["blocked"] = report.get("blocked", 0) + 1
             continue
+        actions += 1
         approved_draft, message_id = claim
         try:
             gmail_id = gmail.submit(approved_draft, message_id, headers)

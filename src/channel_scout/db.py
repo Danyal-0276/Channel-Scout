@@ -206,6 +206,7 @@ class Database:
                WHERE d.id=%s AND a.revoked_at IS NULL AND a.approved_at>now()-(%s*interval '1 day')
                AND c.selection='Qualified' AND c.metadata_at>now()-interval '29 days'
                AND c.contact_email=d.recipient AND c.contact_status='Verified public contact'
+               AND c.draft_status='Pending Approval'
                AND d.id=(SELECT latest.id FROM drafts latest WHERE latest.channel_id=c.id
                          ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
                AND NOT EXISTS (SELECT 1 FROM suppressions WHERE normalized_recipient=d.recipient)
@@ -254,6 +255,18 @@ class Database:
                    )
                    UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id IN (SELECT channel_id FROM stale)""",
             ).rowcount
+
+    def resolve_send(self, draft_id, gmail_id):
+        with self.conn.transaction():
+            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            row = self.execute(
+                """UPDATE send_attempts SET status=%s,gmail_id=%s,reason='reconciled_by_operator',finished_at=now()
+                   WHERE draft_id=%s AND status='Needs Review' RETURNING channel_id""",
+                ("Gmail Accepted" if gmail_id else "Rejected", gmail_id, draft_id),
+            ).fetchone()
+            if not row:
+                raise ApiError("sender", "no_uncertain_send_for_draft")
+            self.execute("UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id=%s", (row["channel_id"],))
 
     def suppress(self, recipient):
         with self.conn.transaction():
