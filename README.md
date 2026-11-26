@@ -1,8 +1,24 @@
 # ChannelScout
 
-ChannelScout discovers YouTube channels from keywords in Google Sheets, finds publicly listed business contacts, and drafts outreach for human review. PostgreSQL stores leads, draft versions, approvals, and send history.
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?logo=googlesheets&logoColor=white)
+![Project status](https://img.shields.io/badge/Status-Scaffold-blue)
 
-**Stack:** Python, LangGraph, local PostgreSQL, Google Sheets, and Windows Task Scheduler. Start with the CLI commands described in the plan. FastAPI becomes useful if a separate UI or webhook needs to call the workflow over HTTP.
+ChannelScout is a planned Python and LangGraph workflow for finding YouTube channels, recording publicly listed business contacts, and preparing outreach drafts for human approval. Google Sheets is the review surface. PostgreSQL stores deduplicated leads, draft versions, approvals, and send history.
+
+**Project status:** The repository contains the scaffold and implementation plans. Discovery, drafting, and sending are planned stages.
+
+## Workflow
+
+1. **Enter keywords.** The scheduled discovery job reads enabled keywords and niches from Google Sheets.
+2. **Find channels.** The YouTube Data API returns up to three pages per keyword. The workflow checks the configured subscriber and country rules and saves one lead per channel ID, with every matching keyword.
+3. **Review results.** The `Leads` tab separates content format, selection status, and contact status. Qualified rows appear green, rows that need review appear yellow, and displayed exclusions appear light red. The `Run Log` separates raw search hits, unique channels, qualified leads, and verified contacts.
+4. **Draft outreach.** Use sourced channel facts and public contact evidence to prepare drafts with Groq or a local Ollama model.
+5. **Approve before sending.** A separate sender checks approval for the exact recipient, subject, and body. Changes require fresh approval. An uncertain Gmail response goes to manual review.
+
+The initial deployment uses Windows Task Scheduler and local PostgreSQL. Add FastAPI if a web UI or webhook needs an HTTP endpoint.
 
 ## Project layout
 
@@ -21,15 +37,13 @@ Channel-Scout/
 └── tests/                 # Filters, integrations, and approval scenarios
 ```
 
-This is a folder blueprint. The first milestone in the plan adds the package manifest, CLI, schema, and discovery workflow.
-
 ## Local configuration
 
+- Use `.env.example` as the configuration template. Keep credentials in the local, Git-ignored `.env` and out of logs.
 - Use database **`channel_scout`** on `127.0.0.1:5432`. The local bootstrap assumes the standard `postgres` login. Before scheduling the worker, create a restricted application login and put its credentials in `.env`.
 - Fill in `YOUTUBE_API_KEY` and `GOOGLE_SHEETS_ID` for discovery. Share the Sheet with the service account and set `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` to its compact, single-line credentials JSON in `.env`.
 - For hosted drafting, set `GROQ_API_KEY`. For local drafting, set `MODEL_PROVIDER=ollama` and `MODEL_NAME=qwen3.5:4b` or `qwen3.5:9b`.
 - Leave `OUTREACH_DRY_RUN=true` while building and validating the approval flow. Supply Gmail OAuth credentials only when testing the separate sender. Keep the OAuth refresh token in `.env` and load it only in that process.
-- Keep `.env` and credential files out of source control and logs. Change the PostgreSQL password shared in chat and update the local configuration before using the account for anything beyond development.
 
 If the database still needs to be created, start the installed PostgreSQL Windows service and run this once. Enter the local password when prompted.
 
@@ -37,7 +51,8 @@ If the database still needs to be created, start the installed PostgreSQL Window
 createdb -h 127.0.0.1 -p 5432 -U postgres -W channel_scout
 ```
 
-[Open the implementation plan](docs/implementation-plan.md).
+## Project docs
 
-[Open the production architecture, guardrails, and eval plan](docs/production-architecture.md).
+- [Implementation plan](docs/implementation-plan.md) covers the folder layout, database design, and milestones.
+- [Production architecture](docs/production-architecture.md) covers LangGraph, approval checks, model fallbacks, evaluations, and recovery.
 
