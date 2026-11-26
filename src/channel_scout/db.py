@@ -146,13 +146,25 @@ class Database:
             (contact, source, contact_status, status, due, channel_id),
         )
 
-    def expire_metadata(self):
-        self.execute(
-            """UPDATE channels SET metadata='{}'::jsonb,selection='Needs Review',
-               selection_reason='metadata_expired',draft_status='Needs Review',sheet_revision=sheet_revision+1,
-               contact_email=NULL,contact_source=NULL,contact_status='Unchecked'
-               WHERE metadata<>'{}'::jsonb AND metadata_at<=now()-interval '29 days'""",
+    def label_format(self, channel_id, content, upload, evidence):
+        result = self.execute(
+            """UPDATE channels SET reviewed_content_format=%s,reviewed_upload_format=%s,
+               format_evidence=%s,sheet_revision=sheet_revision+1 WHERE id=%s""",
+            (content, upload, evidence, channel_id),
         )
+        if not result.rowcount:
+            raise ApiError("review", "lead_missing")
+
+    def expire_metadata(self):
+        with self.conn.transaction():
+            self.execute(
+                """UPDATE channels SET metadata='{}'::jsonb,selection='Needs Review',
+                   selection_reason='metadata_expired',draft_status='Needs Review',sheet_revision=sheet_revision+1,
+                   contact_email=NULL,contact_source=NULL,contact_status='Unchecked'
+                   WHERE metadata<>'{}'::jsonb AND metadata_at<=now()-interval '29 days'""",
+            )
+            self.execute("""UPDATE channel_matches SET video_id=NULL
+                            WHERE video_id IS NOT NULL AND matched_at<=now()-interval '29 days'""")
 
     def pending_channels(self, limit):
         return self.execute(

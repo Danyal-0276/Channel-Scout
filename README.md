@@ -4,11 +4,11 @@
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?logo=googlesheets&logoColor=white)
-![Project status](https://img.shields.io/badge/Status-Scaffold-blue)
+![Project status](https://img.shields.io/badge/Status-Pilot%20setup-blue)
 
-ChannelScout is a planned Python and LangGraph workflow for finding YouTube channels, recording publicly listed business contacts, and preparing outreach drafts for human approval. Google Sheets is the review surface. PostgreSQL stores deduplicated leads, draft versions, approvals, and send history.
+ChannelScout is a Python and LangGraph workflow for finding YouTube channels, recording publicly listed business contacts, and preparing outreach drafts for human approval. Google Sheets is the review surface. PostgreSQL stores deduplicated leads, draft versions, approvals, and send history.
 
-**Project status:** The repository contains the scaffold and implementation plans. Discovery, drafting, and sending are planned stages.
+**Project status:** The workflows and operator commands are implemented. Follow the runbook to connect a Sheet and an offer. Sending defaults to dry-run and the database sender switch starts paused.
 
 ## Workflow
 
@@ -30,8 +30,11 @@ Channel-Scout/
 ├── README.md
 ├── docs/
 │   ├── implementation-plan.md
+│   ├── operations.md
 │   └── production-architecture.md
+├── evals/                 # Synthetic model evaluation cases
 ├── migrations/            # Versioned PostgreSQL schema changes
+├── scripts/               # Credentials, Windows scheduling, and eval commands
 ├── src/
 │   └── channel_scout/      # Python application and LangGraph workflows
 └── tests/                 # Filters, integrations, and approval scenarios
@@ -53,6 +56,7 @@ createdb -h 127.0.0.1 -p 5432 -U postgres -W channel_scout
 
 ## Project docs
 
+- [Operator runbook](docs/operations.md) covers setup, scheduling, and recovery.
 - [Implementation plan](docs/implementation-plan.md) covers the folder layout, database design, and milestones.
 - [Production architecture](docs/production-architecture.md) covers LangGraph, approval checks, model fallbacks, evaluations, and recovery.
 

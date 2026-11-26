@@ -2,19 +2,20 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import psycopg
 
 from .config import ConfigError, Settings
 from .db import Database
-from .domain import normalize_email
+from .domain import CHANNEL_ID, fingerprint, normalize_email, validate_draft
 from .integrations import ApiError, Gmail, GoogleToken, Model, Sheets, YouTube
 from .outreach import run_sender
 from .sheets_sync import sync_sheets
-from .workflows import run_discovery, run_drafting
+from .workflows import evidence_packet, run_discovery, run_drafting
 
 
 def parser():
@@ -28,6 +29,14 @@ def parser():
     send.add_argument("--live", action="store_true")
     suppress = commands.add_parser("suppress")
     suppress.add_argument("recipient")
+    label = commands.add_parser("label-format")
+    label.add_argument("channel_id")
+    label.add_argument("--content", default="")
+    label.add_argument("--upload", default="")
+    label.add_argument("--evidence", required=True)
+    revise = commands.add_parser("revise-draft")
+    revise.add_argument("channel_id")
+    revise.add_argument("reviewed_json", type=Path)
     resolve = commands.add_parser("resolve-send")
     resolve.add_argument("draft_id", type=UUID)
     result = resolve.add_mutually_exclusive_group(required=True)
@@ -71,6 +80,26 @@ def doctor(db, settings):
     current["paused"] = (db.execute("SELECT paused FROM sender_control WHERE singleton").fetchone()["paused"]
                          if current["migrated"] else True)
     print(json.dumps({**current, "credentials_configured": ready, "dry_run": settings.flag("OUTREACH_DRY_RUN", True)}))
+
+
+def revise_draft(db, channel_id, path):
+    with db.conn.transaction():
+        current = db.execute(
+            """SELECT * FROM channels WHERE id=%s AND selection='Qualified'
+               AND metadata_at>now()-interval '29 days' AND contact_status='Verified public contact' FOR UPDATE""",
+            (channel_id,),
+        ).fetchone()
+        if not current or not current["contact_email"]:
+            raise ConfigError("The lead needs a current verified contact before revising the draft")
+        evidence = evidence_packet(current["metadata"].get("description", ""))
+        output = validate_draft(path.read_text(encoding="utf-8-sig"), evidence)
+        if output.status != "draft":
+            raise ConfigError("A revised draft must have draft status")
+        key = fingerprint(channel_id, current["contact_email"], evidence) + ":" + str(uuid4())
+        draft_id = db.save_draft(channel_id, current["contact_email"], output, key, "human", "reviewed")
+        db.draft_result(channel_id, current["contact_email"], current["contact_source"], current["contact_status"],
+                        "Pending Approval", max(current["draft_due"], datetime.now(timezone.utc)))
+    print(f"New draft version {draft_id} is pending approval.")
 
 
 def scheduled(args, db, settings, client):
@@ -151,6 +180,17 @@ def main(argv=None):
             elif command == "suppress":
                 db.suppress(normalize_email(args.recipient))
                 print("Recipient suppression saved.")
+            elif command in {"label-format", "revise-draft"}:
+                if not CHANNEL_ID.fullmatch(args.channel_id):
+                    raise ConfigError("Invalid YouTube channel ID")
+                if command == "label-format":
+                    if not 5 <= len(args.evidence) <= 1000 or not (args.content or args.upload):
+                        raise ConfigError("Provide a format label and its review evidence")
+                    db.label_format(args.channel_id, args.content.strip()[:120] or None,
+                                    args.upload.strip()[:120] or None, args.evidence.strip())
+                    print("Format review saved for the next Sheets sync.")
+                else:
+                    revise_draft(db, args.channel_id, args.reviewed_json)
             elif command == "resolve-send":
                 if args.gmail_id is not None and (not args.gmail_id.strip() or len(args.gmail_id) > 256):
                     raise ConfigError("Invalid Gmail message ID")

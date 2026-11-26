@@ -171,7 +171,12 @@ def drafting_graph(db, primary, fallback, offer, hosts, now, fetch=read_contact_
         previous = db.latest_draft(lead["id"])
         key = fingerprint(lead["id"], email, offer, evidence, SYSTEM_PROMPT, primary.provider, primary.model,
                           fallback.model if fallback else "")
-        status = "Needs Review" if not evidence else "Pending Approval" if previous and previous["fingerprint"] == key else ""
+        reviewed_key = fingerprint(lead["id"], email, evidence) + ":"
+        unchanged = previous and (
+            previous["fingerprint"] == key
+            or (previous["provider"] == "human" and previous["fingerprint"].startswith(reviewed_key))
+        )
+        status = "Needs Review" if not evidence else "Pending Approval" if unchanged else ""
         return {"email": email, "source": source, "contact_status": "Verified public contact", "evidence": evidence,
                 "draft_key": key, "status": status, "delay_hours": 24}
 

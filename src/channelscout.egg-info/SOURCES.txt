@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-src/channel_scout/__init__.py
-src/channelscout.egg-info/PKG-INFO
-src/channelscout.egg-info/SOURCES.txt
-src/channelscout.egg-info/dependency_links.txt
-src/channelscout.egg-info/entry_points.txt
-src/channelscout.egg-info/requires.txt
-src/channelscout.egg-info/top_level.txt

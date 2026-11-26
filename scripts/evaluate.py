@@ -24,8 +24,8 @@ def main():
     reviewed = []
     latencies = []
     with httpx.Client(timeout=20, trust_env=False, headers={"User-Agent": "ChannelScout/0.1"}) as client:
-        pair = model_clients(Settings(root), client)
-        model = pair[args.target == "fallback"]
+        primary, fallback = model_clients(Settings(root), client)
+        model = primary if args.target == "primary" else fallback
         if model is None:
             parser.error("The fallback must be configured locally first.")
         for case in dataset:

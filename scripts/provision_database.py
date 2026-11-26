@@ -57,9 +57,10 @@ def main():
                 db.execute(sql.SQL("GRANT SELECT ON public.schema_migrations, public.sender_control TO {}").format(sql.Identifier(ROLE)))
                 db.execute(sql.SQL(
                     """GRANT SELECT, INSERT, UPDATE ON public.keywords, public.channels, public.channel_matches,
-                       public.drafts, public.approvals, public.send_attempts, public.suppressions, public.api_budget,
+                       public.approvals, public.send_attempts, public.suppressions, public.api_budget,
                        public.job_runs TO {}"""
                 ).format(sql.Identifier(ROLE)))
+                db.execute(sql.SQL("GRANT SELECT, INSERT ON public.drafts TO {}").format(sql.Identifier(ROLE)))
             role_committed = True
             with Database({**parameters, "user": ROLE, "password": password}) as worker:
                 worker.execute("SELECT count(*) FROM channels").fetchone()
