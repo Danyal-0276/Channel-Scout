@@ -43,7 +43,7 @@ Database name: **`channel_scout`**. Use separate migration and restricted runtim
 | Table | Key and purpose |
 | --- | --- |
 | `channels` | YouTube channel ID as primary key. Stores channel metadata, public business contact/source, and metadata refresh timestamp. |
-| `channel_matches` | Unique channel ID, niche, and keyword. Preserves every match while keeping one lead per channel. |
+| `channel_matches` | Unique channel ID, niche, keyword, and search mode. Keeps the source of each match and a matching video reference when available. |
 | `drafts` | Immutable draft ID and unique version per channel. Stores recipient, subject, body, and evidence references. |
 | `approvals` | References one exact draft version. Stores reviewer, approval time, and revocation state. |
 | `send_attempts` | Unique claim per approved draft. Stores state, timestamps, Gmail message ID, and any delivery uncertainty. |

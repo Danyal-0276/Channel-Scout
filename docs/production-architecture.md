@@ -46,6 +46,22 @@ Windows Task Scheduler should use the project working directory, prevent overlap
 - YouTube's policies restrict derived data. Keep the calculated activity label and any filter whose production use depends on that calculation behind a policy decision. Until cleared, show the source publication dates for review. Expire or refresh public API fields within the applicable 30-day window in Postgres, Sheets, and retained evidence. Review the intended use of YouTube data alongside contact evidence and drafting before a live rollout. [YouTube channel resource](https://developers.google.com/youtube/data/reference/rest/v3/channels) · [Playlist items](https://developers.google.com/youtube/data/reference/rest/v3/playlistItems) · [YouTube Developer Policies](https://developers.google.com/youtube/terms/developer-policies) · [Derived-data policy](https://developers.google.com/youtube/terms/derived-metrics-policy)
 - Track search calls and general units separately. Google documents a default of 100 `search.list` calls/day and 10,000 general units/day for other requests apart from the upload bucket. Three pages across five keywords may use 15 search calls. Count retries against the budget, reserve headroom for other calls, and defer queued keywords until the project's quota is available. Defaults reset at midnight Pacific time. [YouTube quota calculator](https://developers.google.com/youtube/data/determine_quota_cost)
 
+### Discovery inputs, formats, and results
+
+| Field | Where it appears | What it means |
+| --- | --- | --- |
+| Niche and keyword | `Keywords` input | Niche is the topic group, such as Real Estate. Keyword is the exact search phrase, such as Real Estate Podcast. |
+| Target format | `Keywords` input | Optional editorial preference, such as Podcast, Interview, Tutorial, or Any. A preference alone does not qualify or exclude a channel. |
+| Search mode | `Keywords` input and match record | Channel search matches a channel directly. Optional Video search matches a video and traces it back to its channel. Channel search is the initial default. |
+| Content format | `Leads` result | Evidence-backed editorial labels such as Podcast, Interview, Tutorial, or Unknown. A channel can have multiple labels. Keep the source or reviewer decision. |
+| Upload format | Evidence record or lead detail | Keep upload-medium observations separate from editorial labels. Use Live replay where supported by broadcast metadata, a reviewer-confirmed Short where available, and Unknown where evidence is insufficient. |
+| Selection result | `Leads` and `Run Log` | Qualified, Needs Review, or Excluded with a reason code. Qualified leads and review candidates can appear in the lead view. Exclusions are visible through reason counts in the run log. |
+| Contact and outreach | `Leads` result | Track contact availability, draft readiness, and approval/send state independently. A qualified channel can have no public contact. |
+
+Use one record per channel in `Leads`, with views filtered by niche, format, or selection status. Keep separate match records for each niche, keyword, and search mode. Record a matching video as evidence when Video search is used. A single podcast interview can be both Podcast and Interview, and either can be a livestream replay. An unknown result remains visible for review. Confirm policy treatment before enabling labels inferred from YouTube API data, and prefer creator-provided or reviewer-confirmed labels. Short length alone does not identify a YouTube Short. [YouTube search resource](https://developers.google.com/youtube/data/reference/rest/v3/search/list) · [Video metadata](https://developers.google.com/youtube/data/reference/rest/v3/videos) · [YouTube Shorts classification](https://support.google.com/youtube/answer/15424877)
+
+Report raw search hits, unique channels checked, qualified, needs review, excluded, already known, new leads, and verified contacts independently in `Run Log`. Per-keyword results can overlap. Calculate overall totals from unique channel IDs. The initial cap is **150 raw hits per keyword across its enabled search modes**. If Video search is enabled, split that quota explicitly so it does not double the number of pages fetched. A raw video hit contributes its channel ID to deduplication. It does not create a separate lead.
+
 ### Contact and drafting graph
 
 `load_lead → collect_contact_evidence → check_readiness → draft → validate → persist_version`
