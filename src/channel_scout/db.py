@@ -43,6 +43,11 @@ class Database:
         report = {}
         status = "ok"
         try:
+            self.execute(
+                """UPDATE job_runs SET finished_at=now(),status='interrupted',
+                   report=jsonb_build_object('error','previous_worker_lost')
+                   WHERE job=%s AND status='running'""", (name,),
+            )
             self.execute("INSERT INTO job_runs (id, job, status) VALUES (%s,%s,'running')", (run_id, name))
             yield report
             if report.get("deferred") or report.get("errors"):

@@ -49,7 +49,7 @@ def discovery_graph(db, youtube, activity_enabled, now):
                     if activity_enabled:
                         activity = classify_activity(publishes, complete, now)
                 except ApiError as error:
-                    if error.code == "daily_quota" or error.status in {401, 403}:
+                    if error.code in {"daily_quota", "job_deadline"} or error.status in {401, 403}:
                         raise
                 except ValueError:
                     publishes = []
@@ -95,7 +95,7 @@ def run_discovery(db, sheets, youtube, activity_enabled, limit, report):
         try:
             result = graph.invoke({"keyword": keyword, "pages": pages})
         except ApiError as error:
-            if error.code == "daily_quota":
+            if error.code in {"daily_quota", "job_deadline"}:
                 deferred += 1
                 break
             if error.status in {400, 401, 403} and not error.retryable:

@@ -26,7 +26,10 @@ foreach ($job in $selected) {
     }
 }
 foreach ($job in $selected) {
-    $action = New-ScheduledTaskAction -Execute $python -WorkingDirectory $root -Argument "-m channel_scout.cli $($job.Command)"
+    $runner = Join-Path $PSScriptRoot 'run-job.ps1'
+    $powershell = (Get-Command pwsh -ErrorAction Stop).Source
+    $arguments = '-NoProfile -NonInteractive -File "{0}" -Job {1}' -f $runner,$job.Command
+    $action = New-ScheduledTaskAction -Execute $powershell -WorkingDirectory $root -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes($job.Offset) -RepetitionInterval (New-TimeSpan -Minutes 15)
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 12)
     Register-ScheduledTask -TaskName $job.Name -Action $action -Trigger $trigger -Settings $settings -Description 'ChannelScout recurring job. Runs when the current Windows user is signed in.' | Out-Null

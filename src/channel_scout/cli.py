@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -23,7 +24,7 @@ def parser():
     parser.add_argument("--project-dir", type=Path, default=Path.cwd())
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("migrate", "doctor", "setup-sheets", "discover", "draft", "sync-sheets",
-                 "sender-pause", "sender-enable", "send-status"):
+                 "sender-pause", "sender-enable", "send-status", "job-status"):
         commands.add_parser(name)
     send = commands.add_parser("send-approved")
     send.add_argument("--live", action="store_true")
@@ -111,7 +112,14 @@ def scheduled(args, db, settings, client):
             "search": settings.integer("YOUTUBE_SEARCH_BUDGET", 90, 1, 10000),
             "general": settings.integer("YOUTUBE_GENERAL_BUDGET", 9000, 1, 1000000),
         }
-        youtube = YouTube(client, settings.require("YOUTUBE_API_KEY"), lambda bucket: db.reserve(bucket, quotas[bucket]))
+        deadline = time.monotonic() + 540
+
+        def reserve(bucket):
+            if time.monotonic() > deadline:
+                raise ApiError("youtube", "job_deadline")
+            db.reserve(bucket, quotas[bucket])
+
+        youtube = YouTube(client, settings.require("YOUTUBE_API_KEY"), reserve)
         with db.job(command) as report:
             run_discovery(db, sheets, youtube, settings.flag("ENABLE_ACTIVITY_CLASSIFICATION"), limit, report)
     elif command == "draft":
@@ -176,6 +184,11 @@ def main(argv=None):
                 print(json.dumps(db.execute(
                     """SELECT draft_id,message_id,gmail_id,status,reason,claimed_at,finished_at
                        FROM send_attempts ORDER BY claimed_at DESC LIMIT 25"""
+                ).fetchall(), default=str))
+            elif command == "job-status":
+                print(json.dumps(db.execute(
+                    """SELECT DISTINCT ON (job) job,status,started_at,finished_at,
+                       report - 'keywords' AS counts FROM job_runs ORDER BY job,started_at DESC"""
                 ).fetchall(), default=str))
             elif command == "suppress":
                 db.suppress(normalize_email(args.recipient))

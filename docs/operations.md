@@ -34,7 +34,7 @@ To enter reviewed format labels, run `label-format <channel-id> --content 'Podca
 
 ## Scheduling
 
-After the manual smoke run succeeds, register the desired jobs. Each registered job runs every 15 minutes when the Windows account is signed in and the PC is available. Unchanged keywords refresh daily. Read missed or failed job information in Task Scheduler and progression in the Sheet's `Run Log`.
+After the manual smoke run succeeds, register the desired jobs from PowerShell 7. Each registered job runs every 15 minutes when the Windows account is signed in and the PC is available. Unchanged keywords refresh daily. Read failed job information in Task Scheduler, `logs/`, or `channel-scout job-status`. The Sheet's `Run Log` carries the projected run counts.
 
 ```powershell
 .\scripts\register-jobs.ps1 -IncludeDiscoveryAndSync -IncludeDrafting
