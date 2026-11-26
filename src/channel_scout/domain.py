@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 
 CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}\Z")

@@ -1,6 +1,6 @@
 import secrets
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -149,7 +149,8 @@ class Database:
     def expire_metadata(self):
         self.execute(
             """UPDATE channels SET metadata='{}'::jsonb,selection='Needs Review',
-               selection_reason='metadata_expired',draft_status='Needs Review',sheet_revision=sheet_revision+1
+               selection_reason='metadata_expired',draft_status='Needs Review',sheet_revision=sheet_revision+1,
+               contact_email=NULL,contact_source=NULL,contact_status='Unchecked'
                WHERE metadata<>'{}'::jsonb AND metadata_at<=now()-interval '29 days'""",
         )
 
@@ -163,8 +164,8 @@ class Database:
                       AND m.matched_at>now()-interval '29 days'),'[]'::jsonb) AS matches
                FROM channels c
                LEFT JOIN LATERAL (SELECT * FROM drafts WHERE channel_id=c.id ORDER BY created_at DESC,id DESC LIMIT 1) d ON true
-               LEFT JOIN LATERAL (SELECT * FROM send_attempts WHERE channel_id=c.id AND status<>'Rejected'
-                                  ORDER BY claimed_at DESC LIMIT 1) s ON true
+               LEFT JOIN LATERAL (SELECT * FROM send_attempts WHERE channel_id=c.id
+                                  ORDER BY (status<>'Rejected') DESC,claimed_at DESC LIMIT 1) s ON true
                WHERE c.sheet_synced<c.sheet_revision ORDER BY c.id LIMIT %s""", (limit,),
         ).fetchall()
 
@@ -218,6 +219,8 @@ class Database:
             self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
             if self.execute("SELECT paused FROM sender_control WHERE singleton FOR UPDATE").fetchone()["paused"]:
                 return None
+            self.execute("""SELECT c.id FROM channels c JOIN drafts d ON d.channel_id=c.id
+                            WHERE d.id=%s FOR UPDATE OF c""", (draft_id,)).fetchone()
             count = self.execute(
                 """SELECT count(*) AS count FROM send_attempts
                    WHERE (claimed_at AT TIME ZONE 'UTC')::date=(now() AT TIME ZONE 'UTC')::date"""
