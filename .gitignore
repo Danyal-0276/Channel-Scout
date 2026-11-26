@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 /secrets/
+/channelscout12-*.json
 
 # Python and local runtime files
 .venv/
