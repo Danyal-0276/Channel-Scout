@@ -134,6 +134,8 @@ class GoogleToken:
     def sheets(cls, settings):
         try:
             info = json.loads(settings.require("GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON"))
+            if not isinstance(info, dict) or info.get("token_uri") != "https://oauth2.googleapis.com/token":
+                raise ValueError("Unexpected service account credential type or token endpoint")
             account = service_account.Credentials.from_service_account_info(
                 info, scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
@@ -186,7 +188,7 @@ class Sheets:
     def append(self, tab, values):
         return request(self.client, "sheets", "POST", f"{self.url}/values/{quote(tab, safe='')}:append",
                        attempts=1, headers=self.token.headers(),
-                       params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"}, json={"values": values})
+                       params={"valueInputOption": "RAW", "insertDataOption": "OVERWRITE"}, json={"values": values})
 
     def metadata(self):
         return request(self.client, "sheets", "GET", self.url, headers=self.token.headers(),
@@ -278,9 +280,10 @@ def public_contact_urls(description: str, hosts: set[str]) -> list[str]:
 class PublicConnection(http.client.HTTPSConnection):
     def connect(self):
         addresses = socket.getaddrinfo(self.host, 443, type=socket.SOCK_STREAM)
-        if not addresses or any(not ipaddress.ip_address(row[4][0]).is_global for row in addresses):
+        resolved = [ipaddress.ip_address(row[4][0]) for row in addresses]
+        if not resolved or any(not address.is_global or address.is_multicast for address in resolved):
             raise OSError("non-public destination")
-        raw = socket.create_connection((addresses[0][4][0], 443), self.timeout)
+        raw = socket.create_connection((str(resolved[0]), 443), self.timeout)
         try:
             self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
         except Exception:

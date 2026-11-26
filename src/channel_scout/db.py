@@ -179,7 +179,9 @@ class Database:
         ).fetchall()
 
     def enable_sender(self, enabled):
-        self.execute("UPDATE sender_control SET paused=%s WHERE singleton", (not enabled,))
+        with self.conn.transaction():
+            self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
+            self.execute("UPDATE sender_control SET paused=%s WHERE singleton", (not enabled,))
 
     def import_approvals(self, approvals):
         with self.conn.transaction():
@@ -218,7 +220,7 @@ class Database:
     def claim(self, draft_id, days, cap):
         with self.conn.transaction():
             self.execute("SELECT pg_advisory_xact_lock(hashtext('channelscout:delivery'))")
-            if self.execute("SELECT paused FROM sender_control WHERE singleton FOR UPDATE").fetchone()["paused"]:
+            if self.execute("SELECT paused FROM sender_control WHERE singleton").fetchone()["paused"]:
                 return None
             self.execute("""SELECT c.id FROM channels c JOIN drafts d ON d.channel_id=c.id
                             WHERE d.id=%s FOR UPDATE OF c""", (draft_id,)).fetchone()
