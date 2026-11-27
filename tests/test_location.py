@@ -45,6 +45,8 @@ def test_explicit_country_can_replace_a_default_exclusion():
 @pytest.mark.parametrize(("country", "description", "expected"), [
     ("US", "We are based in Toronto.", "Outside target"),
     ("", "We are based in Toronto.", "Unverified"),
+    ("", "We’re based in Toronto, Ontario, Canada.", "City stated"),
+    ("", "Based in Toronto, we travel across Canada.", "Unverified"),
     ("CA", "We’re based in Toronto. We interview local founders.", "City stated"),
     ("CA", "Our studio is located in Toronto.", "City stated"),
     ("CA", "We make Toronto real estate videos.", "Unverified"),
@@ -59,6 +61,7 @@ def test_city_and_country_require_location_evidence(country, description, expect
 
 def test_country_only_and_city_only_are_both_supported():
     assert location_result("GB", "", {"country": "GB"})[0] == "Country matches"
+    assert location_result("", "We are based in Canada.", {"country": "CA"})[0] == "Country stated"
     assert location_result("", "Based in Cambridge, Massachusetts.", {"city": "Cambridge, Massachusetts"})[0] == "City stated"
     assert search_topic("Toronto housing podcast", {"country": "CA", "city": "Toronto"}) == "Toronto housing podcast Canada"
 

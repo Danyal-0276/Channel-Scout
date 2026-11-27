@@ -106,22 +106,34 @@ def search_topic(query: str, criteria: dict) -> str:
 
 def location_result(country: str, description: str, criteria: dict) -> tuple[str, str]:
     target, city = criteria.get("country"), criteria.get("city")
+    if not target and not city:
+        return "Any location", ""
     if target and country and country != target:
         return "Outside target", "country_mismatch"
-    if target and country != target:
-        return "Unverified", "country_not_confirmed"
-    if city:
-        place = re.escape(place_text(city))
-        explicit = (rf"^(?:(?:we are|we're|i am|i'm|our (?:team|channel|studio) is)\s+)?"
-                    rf"(?:based|located|headquartered)\s+in\s+{place}(?!\w)")
-        for sentence in re.split(r"[.!?\n]+", description):
-            wording = place_text(sentence)
-            if re.search(explicit, wording) and not re.search(r"\b(?:until|formerly|previously)\b", wording):
-                return "City stated", "explicit_city_statement"
-        return "Unverified", "city_not_confirmed"
-    if target:
+    if target and country == target and not city:
         return "Country matches", "channel_country_matches"
-    return "Any location", ""
+    explicit = re.compile(r"^(?:(?:we are|we're|i am|i'm|our (?:team|channel|studio) is)\s+)?"
+                          r"(?:based|located|headquartered)\s+in\s+(.+)$")
+    claims = []
+    for sentence in re.split(r"[.!?;\n|—]+", description):
+        wording = place_text(sentence)
+        match = explicit.match(wording)
+        if match and not re.search(r"\b(?:until|formerly|previously)\b", wording):
+            claims.append(match.group(1))
+    if target and not country:
+        name = re.escape(place_text(pycountry.countries.get(alpha_2=target).name))
+        if not city:
+            if any(re.search(rf"(?:^|,\s*){name}$", value) for value in claims):
+                return "Country stated", "explicit_country_statement"
+            return "Unverified", "country_not_confirmed"
+        place = re.escape(place_text(city))
+        combined = rf"{place}(?:\s+|,\s*|,\s*[^,]{{1,50}},\s*){name}"
+        if any(re.fullmatch(combined, value) for value in claims):
+            return "City stated", "explicit_city_country_statement"
+        return "Unverified", "country_not_confirmed"
+    if city and any(re.match(rf"{re.escape(place_text(city))}(?!\w)", value) for value in claims):
+        return "City stated", "explicit_city_statement"
+    return "Unverified", "city_not_confirmed"
 
 
 def lead_priority(selection: str, contact: str, draft: str) -> str:
@@ -221,11 +233,14 @@ def validate_draft(raw: str, evidence: dict[str, str]) -> DraftOutput:
         if result.subject or result.body or result.evidence_ids:
             raise ValueError("invalid_abstention")
         return result
+    copy = place_text(result.subject + " " + result.body)
     if (
         not result.subject.strip() or not result.body.strip() or not result.evidence_ids
         or any(character in result.subject for character in "\r\n\x00")
         or any(ord(c) < 32 and c not in "\r\n\t" for c in result.body)
         or not set(result.evidence_ids) <= evidence.keys()
+        or re.search(r"\bsource-\d+\b", copy)
+        or re.search(r"\bi(?:'ve| have)?\s+(?:recently\s+)?(?:watched|listened|followed|subscribed|enjoyed)\b", copy)
         or BUSINESS_EMAIL.search(result.subject + " " + result.body)
         or URL.search(result.subject + " " + result.body)
     ):

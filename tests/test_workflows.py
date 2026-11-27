@@ -100,6 +100,8 @@ def test_contact_url_policy(value):
 @pytest.mark.parametrize("key,value", [
     ("subject", "Subject\r\nBcc: x@example.com"), ("subject", ""), ("body", ""),
     ("body", "Visit https://example.com"), ("body", "Reply to a@example.com"), ("body", "\u0000"),
+    ("body", "Your interviews cover the topic (source-1)."),
+    ("body", "I’ve listened to your podcast."),
     ("evidence_ids", ["made-up"]), ("evidence_ids", []), ("recipient", "a@example.com"),
     ("status", "send"), ("status", "abstain"), ("evidence_ids", [1]), ("subject", "x" * 101),
 ])

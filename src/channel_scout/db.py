@@ -213,6 +213,13 @@ class Database:
             )
             self.execute("""UPDATE channel_matches SET video_id=NULL
                             WHERE video_id IS NOT NULL AND matched_at<=now()-interval '29 days'""")
+            aged = self.execute(
+                """SELECT DISTINCT m.channel_id FROM channel_matches m
+                   JOIN keywords k ON k.id=m.keyword_id
+                   JOIN channels c ON c.id=m.channel_id
+                   WHERE k.enabled AND m.matched_at<=now()-interval '29 days' AND c.metadata<>'{}'::jsonb""",
+            ).fetchall()
+            self.recompute_selection([row["channel_id"] for row in aged])
 
     def pending_channels(self, limit, *, export=False):
         return self.execute(

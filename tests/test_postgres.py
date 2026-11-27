@@ -185,6 +185,10 @@ def test_each_area_has_an_independent_match_and_disabling_a_row_recomputes_prior
     entries = db.pending_channels(10)
     assert len(entries) == 1 and entries[0]["selection"] == "Qualified"
     assert {match["location_match"] for match in entries[0]["matches"]} == {"City stated", "Outside target"}
+    db.execute("UPDATE channel_matches SET matched_at=now()-interval '30 days' WHERE keyword_id='toronto'")
+    db.expire_metadata()
+    assert db.pending_channels(10)[0]["selection"] == "Excluded"
+    db.ingest(toronto, [{**channel, "reason": "explicit_city_statement", "location_match": "City stated"}])
     db.keywords([seattle])
     entries = db.pending_channels(10)
     assert entries[0]["selection"] == "Excluded"

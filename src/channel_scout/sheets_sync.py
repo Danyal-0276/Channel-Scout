@@ -82,7 +82,7 @@ def lead_row(lead):
         draft_id, lead["review_token"] if draft_ready else "",
         lead["sent_at"].isoformat() if send == "Sent" and lead["sent_at"] else "",
         areas, geography or ("Any location" if matches else ""),
-        lead_priority(lead["selection"], lead["contact_status"], lead["draft_status"]),
+        lead_priority(lead["selection"], lead["contact_status"], send if draft_ready else ""),
     ]
 
 
