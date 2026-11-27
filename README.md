@@ -1,62 +1,94 @@
-# ChannelScout
+<p align="center">
+  <img src="assets/branding/channel-scout-mascot.png" width="200" alt="ChannelScout mascot, a purple robot detective with a magnifying glass">
+</p>
 
-![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
-![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?logo=googlesheets&logoColor=white)
-![Project status](https://img.shields.io/badge/Status-Pilot%20setup-blue)
+<h1 align="center">ChannelScout Agent</h1>
 
-ChannelScout is a Python and LangGraph workflow for finding YouTube channels, recording publicly listed business contacts, and preparing outreach drafts for human approval. Google Sheets is the review surface. PostgreSQL stores deduplicated leads, draft versions, approvals, and send history.
+<p align="center">
+  <strong>Find YouTube channels. Review leads. Approve outreach.</strong>
+</p>
 
-**Project status:** The workflows and operator commands are implemented. Follow the runbook to connect a Sheet and an offer. Sending defaults to dry-run and the database sender switch starts paused.
+<p align="center">
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&amp;logoColor=white">
+  <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1C3C3C">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&amp;logoColor=white">
+  <img alt="Google Sheets" src="https://img.shields.io/badge/Google%20Sheets-34A853?logo=googlesheets&amp;logoColor=white">
+</p>
 
-## Workflow
+<p align="center">
+  <a href="#scout-how-it-works">How it works</a> ·
+  <a href="#scout-quick-start">Quick start</a> ·
+  <a href="#scout-approval-and-sending">Approval and sending</a> ·
+  <a href="#scout-project-docs">Project docs</a>
+</p>
 
-1. **Enter keywords.** The scheduled discovery job reads enabled keywords and niches from Google Sheets.
-2. **Find channels.** The YouTube Data API returns up to three pages per keyword. The workflow checks the configured subscriber and country rules and saves one lead per channel ID, with every matching keyword.
-3. **Review results.** The `Leads` tab separates content format, selection status, and contact status. Qualified rows appear green, rows that need review appear yellow, and displayed exclusions appear light red. The `Run Log` separates raw search hits, unique channels, qualified leads, and verified contacts.
-4. **Draft outreach.** Use sourced channel facts and public contact evidence to prepare drafts with Groq or a local Ollama model.
-5. **Approve before sending.** A separate sender checks approval for the exact recipient, subject, and body. Changes require fresh approval. An uncertain Gmail response goes to manual review.
+ChannelScout Agent turns keywords in Google Sheets into a deduplicated list of YouTube channels. It looks for publicly listed business contacts and uses channel evidence to draft personalized outreach. LangGraph runs discovery and drafting, PostgreSQL holds the records, and Google Sheets is where you review results.
 
-The initial deployment uses Windows Task Scheduler and local PostgreSQL. Add FastAPI if a web UI or webhook needs an HTTP endpoint.
+<a name="scout-how-it-works"></a>
+<h2 align="center">How it works</h2>
 
-## Project layout
+1. **Enter keywords.** In `Keywords`, add a niche, keyword, and enabled flag. Channel search is the default. Optional video search finds matching videos and traces them back to their channels.
+2. **Filter and deduplicate.** ChannelScout checks up to three result pages per keyword. It keeps channels with 1,000–1,000,000 reported subscribers, excludes reported countries `IN`, `PK`, and `BD`, and keeps channels with no country listed. A channel appears once, with its matching keywords preserved.
+3. **Review leads.** The `Leads` tab keeps selection, format, and contact status separate. Green means **Qualified**, yellow means **Needs Review**, and light red means **Excluded** when an excluded row is displayed. `Run Log` distinguishes raw search hits, unique channels, qualified leads, and contacts found.
+4. **Review drafts.** ChannelScout keeps the contact source alongside the lead and leaves the address blank when no public business contact is found. Groq or local Ollama drafts from sourced channel details and the offer you configure.
 
-```text
-Channel-Scout/
-├── .env                   # Local values, including secrets
-├── .env.example           # Shareable configuration template
-├── .gitignore
-├── README.md
-├── docs/
-│   ├── implementation-plan.md
-│   ├── operations.md
-│   └── production-architecture.md
-├── evals/                 # Synthetic model evaluation cases
-├── migrations/            # Versioned PostgreSQL schema changes
-├── scripts/               # Credentials, Windows scheduling, and eval commands
-├── src/
-│   └── channel_scout/      # Python application and LangGraph workflows
-└── tests/                 # Filters, integrations, and approval scenarios
-```
+The optional 90-day activity filter is disabled by default. Channels with hidden or unavailable subscriber counts go to review.
 
-## Local configuration
+<a name="scout-quick-start"></a>
+<h2 align="center">Quick start</h2>
 
-- Use `.env.example` as the configuration template. Keep credentials in the local, Git-ignored `.env` and out of logs.
-- Use database **`channel_scout`** on `127.0.0.1:5432`. The local bootstrap assumes the standard `postgres` login. Before scheduling the worker, create a restricted application login and put its credentials in `.env`.
-- Fill in `YOUTUBE_API_KEY` and `GOOGLE_SHEETS_ID` for discovery. Share the Sheet with the service account and set `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` to its compact, single-line credentials JSON in `.env`.
-- For hosted drafting, set `GROQ_API_KEY`. For local drafting, set `MODEL_PROVIDER=ollama` and `MODEL_NAME=qwen3.5:4b` or `qwen3.5:9b`.
-- Leave `OUTREACH_DRY_RUN=true` while building and validating the approval flow. Supply Gmail OAuth credentials only when testing the separate sender. Keep the OAuth refresh token in `.env` and load it only in that process.
+You’ll need **Python 3.12+**, PostgreSQL, a YouTube Data API key, and a Google Sheet shared with a Sheets service account. For drafting, choose a Groq API key or a local Ollama model.
 
-If the database still needs to be created, start the installed PostgreSQL Windows service and run this once. Enter the local password when prompted.
+From the repo root in PowerShell:
 
 ```powershell
-createdb -h 127.0.0.1 -p 5432 -U postgres -W channel_scout
+python -m venv .venv
+$python = '.\.venv\Scripts\python.exe'
+& $python -m pip install -e '.[test]'
+if (-not (Test-Path -LiteralPath '.env')) { Copy-Item '.env.example' '.env' }
 ```
 
-## Project docs
+Use [the environment template](.env.example) to configure the database, YouTube, Sheets, and your model. Set `CHANNELSCOUT_OFFER` to what you’re offering creators and the next step you want the draft to ask for. Keep secrets in your ignored `.env`. The [operator runbook](docs/operations.md) walks through the database migration, restricted login, and service-account setup.
 
-- [Operator runbook](docs/operations.md) covers setup, scheduling, and recovery.
-- [Implementation plan](docs/implementation-plan.md) covers the folder layout, database design, and milestones.
-- [Production architecture](docs/production-architecture.md) covers LangGraph, approval checks, model fallbacks, evaluations, and recovery.
+Once those are ready, run one manual cycle:
 
+```powershell
+& $python -m channel_scout.cli doctor
+& $python -m channel_scout.cli setup-sheets
+& $python -m channel_scout.cli discover
+& $python -m channel_scout.cli draft
+& $python -m channel_scout.cli sync-sheets
+```
+
+On Windows, register the discovery, drafting, and sync jobs with `scripts/register-jobs.ps1`. Registered jobs run every 15 minutes while the Windows user is signed in and the PC is available. New or changed keywords are picked up on the next discovery run. Existing keywords refresh daily as quota allows. [Scheduling instructions](docs/operations.md#scheduling)
+
+<a name="scout-approval-and-sending"></a>
+<h2 align="center">Approval and sending</h2>
+
+- In the protected `Approvals` tab, approve the exact recipient, subject, and body using the draft ID and review token. An edit creates a new draft version that needs fresh approval.
+- Gmail sending uses a dedicated command and starts **paused** in **dry-run** mode. Live sending requires Gmail OAuth, explicit live configuration, a current approval, and recipient eligibility.
+- The sender records submission attempts in PostgreSQL to prevent duplicates. An uncertain Gmail response goes to **Needs Review** for manual reconciliation.
+
+[Owner approval and recovery instructions](docs/operations.md#owner-approval-and-sending)
+
+<h2 align="center">Repository layout</h2>
+
+| Path | What’s there |
+| --- | --- |
+| [`assets/branding/`](assets/branding/) | Original mascot PNG for the README or a future interface |
+| [`src/channel_scout/`](src/channel_scout/) | CLI, LangGraph workflows, integrations, and approval checks |
+| [`migrations/`](migrations/) | Versioned PostgreSQL schema |
+| [`scripts/`](scripts/) | Credential setup, Windows scheduling, and model evaluation |
+| [`tests/`](tests/) and [`evals/`](evals/) | Regression tests and synthetic drafting cases |
+| [`docs/`](docs/) | Setup, architecture, and operating guides |
+
+<h2 align="center">Tests and evaluations</h2>
+
+Run `python -m pytest -q` in the virtual environment. PostgreSQL integration tests use disposable schemas and can be enabled with `CHANNELSCOUT_TEST_POSTGRES=1`. The optional `scripts/evaluate.py` command calls the configured model with synthetic inputs to check structured output, abstention, and latency. [Test and evaluation instructions](docs/operations.md#test-and-evaluate)
+
+<a name="scout-project-docs"></a>
+<h2 align="center">Project docs</h2>
+
+- [Operator runbook](docs/operations.md) for credentials, local setup, scheduling, and recovery.
+- [Production architecture](docs/production-architecture.md) for workflows, guardrails, fallbacks, and release gates.
+- [Implementation plan](docs/implementation-plan.md) for project structure and database design.
