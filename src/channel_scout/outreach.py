@@ -21,8 +21,12 @@ def decisions(rows):
             continue
         token, decision, evidence = fields
         value = {"token": token, "evidence": evidence}
-        if (decision != "Approve" or not token or not 5 <= len(evidence) <= 1000
-                or (draft_id in approved and approved[draft_id] != value)):
+        if (
+            decision != "Approve"
+            or not token
+            or not 5 <= len(evidence) <= 1000
+            or (draft_id in approved and approved[draft_id] != value)
+        ):
             blocked.add(draft_id)
         else:
             approved[draft_id] = value
@@ -42,11 +46,16 @@ def reviewed_snapshot(sheets, draft, decision):
     except ValueError:
         return False
     return (
-        valid_recipient and row.get("Selection Status") == "Qualified"
+        valid_recipient
+        and row.get("Selection Status") == "Qualified"
         and row.get("Contact Email") == draft["recipient"]
-        and row.get("Subject") == draft["subject"] and row.get("Draft Body") == draft["body"]
-        and row.get("Draft ID") == str(draft["id"]) and row.get("Review Token") == draft["review_token"]
-        and secrets.compare_digest(decision["token"].encode(), draft["review_token"].encode())
+        and row.get("Subject") == draft["subject"]
+        and row.get("Draft Body") == draft["body"]
+        and row.get("Draft ID") == str(draft["id"])
+        and row.get("Review Token") == draft["review_token"]
+        and secrets.compare_digest(
+            decision["token"].encode(), draft["review_token"].encode()
+        )
     )
 
 
@@ -72,7 +81,9 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
         headers = gmail.token.headers()
         current = decisions(sheets.verified_approvals())
         db.import_approvals(current)
-        if current.get(draft_id) != decision or not reviewed_snapshot(sheets, draft, decision):
+        if current.get(draft_id) != decision or not reviewed_snapshot(
+            sheets, draft, decision
+        ):
             report["blocked"] = report.get("blocked", 0) + 1
             continue
         claim = db.claim(draft_id, days, cap)
@@ -85,7 +96,11 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
             gmail_id = gmail.submit(approved_draft, message_id, headers)
         except ApiError as error:
             definitive = error.status in {400, 401, 403, 404, 429}
-            db.finish_send(draft_id, "Rejected" if definitive else "Needs Review", reason=error.code)
+            db.finish_send(
+                draft_id,
+                "Rejected" if definitive else "Needs Review",
+                reason=error.code,
+            )
             metric = "rejected" if definitive else "uncertain"
             report[metric] = report.get(metric, 0) + 1
             # Pause this run on auth, quota, transient provider, or ambiguous failures.

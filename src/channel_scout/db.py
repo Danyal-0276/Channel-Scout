@@ -27,21 +27,31 @@ class Database:
         return self.conn.execute(query, values)
 
     def lock_transaction(self, name):
-        self.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (self.lock_prefix + name,))
+        self.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))", (self.lock_prefix + name,)
+        )
 
     def migrate(self, paths):
         with self.conn.transaction():
             self.lock_transaction("migrate")
-            self.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)")
+            self.execute(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)"
+            )
             for path in sorted(paths):
-                if not self.execute("SELECT 1 FROM schema_migrations WHERE name=%s", (path.name,)).fetchone():
+                if not self.execute(
+                    "SELECT 1 FROM schema_migrations WHERE name=%s", (path.name,)
+                ).fetchone():
                     self.execute(path.read_text(encoding="utf-8"))
-                    self.execute("INSERT INTO schema_migrations VALUES (%s)", (path.name,))
+                    self.execute(
+                        "INSERT INTO schema_migrations VALUES (%s)", (path.name,)
+                    )
 
     @contextmanager
     def job(self, name):
         key = self.lock_prefix + name
-        locked = self.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (key,)).fetchone()["locked"]
+        locked = self.execute(
+            "SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (key,)
+        ).fetchone()["locked"]
         if not locked:
             raise ApiError("scheduler", "job_already_running")
         run_id = uuid4()
@@ -51,39 +61,54 @@ class Database:
             self.execute(
                 """UPDATE job_runs SET finished_at=now(),status='interrupted',
                    report=jsonb_build_object('error','previous_worker_lost')
-                   WHERE job=%s AND status='running'""", (name,),
+                   WHERE job=%s AND status='running'""",
+                (name,),
             )
-            self.execute("INSERT INTO job_runs (id, job, status) VALUES (%s,%s,'running')", (run_id, name))
+            self.execute(
+                "INSERT INTO job_runs (id, job, status) VALUES (%s,%s,'running')",
+                (run_id, name),
+            )
             yield report
             if report.get("deferred") or report.get("errors"):
                 status = "partial"
         except BaseException as error:
             status = "failed"
-            report["error"] = error.code if isinstance(error, ApiError) else type(error).__name__
+            report["error"] = (
+                error.code if isinstance(error, ApiError) else type(error).__name__
+            )
             raise
         finally:
             try:
-                self.execute("UPDATE job_runs SET finished_at=now(),status=%s,report=%s WHERE id=%s",
-                             (status, Jsonb(report), run_id))
+                self.execute(
+                    "UPDATE job_runs SET finished_at=now(),status=%s,report=%s WHERE id=%s",
+                    (status, Jsonb(report), run_id),
+                )
             finally:
                 self.execute("SELECT pg_advisory_unlock(hashtext(%s))", (key,))
 
     def reserve(self, bucket, limit):
-        day = datetime.now(timezone.utc).astimezone(ZoneInfo("America/Los_Angeles")).date()
+        day = (
+            datetime.now(timezone.utc)
+            .astimezone(ZoneInfo("America/Los_Angeles"))
+            .date()
+        )
         if limit <= 0:
             raise ApiError("youtube", "daily_quota")
         result = self.execute(
             """INSERT INTO api_budget (quota_day,bucket,used) VALUES (%s,%s,1)
                ON CONFLICT (quota_day,bucket) DO UPDATE SET used=api_budget.used+1
-               WHERE api_budget.used < %s RETURNING used""", (day, bucket, limit),
+               WHERE api_budget.used < %s RETURNING used""",
+            (day, bucket, limit),
         ).fetchone()
         if not result:
             raise ApiError("youtube", "daily_quota")
 
     def keywords(self, records):
         with self.conn.transaction():
-            self.execute("UPDATE keywords SET enabled=false WHERE enabled AND NOT (id=ANY(%s))",
-                         ([row["id"] for row in records],))
+            self.execute(
+                "UPDATE keywords SET enabled=false WHERE enabled AND NOT (id=ANY(%s))",
+                ([row["id"] for row in records],),
+            )
             for row in records:
                 self.execute(
                     """INSERT INTO keywords (id,niche,query,mode,target_format)
@@ -91,19 +116,26 @@ class Database:
                        ON CONFLICT (id) DO UPDATE SET enabled=true, niche=excluded.niche, query=excluded.query,
                        target_format=excluded.target_format,
                        next_run_at=CASE WHEN NOT keywords.enabled OR keywords.target_format<>excluded.target_format
-                                        THEN now() ELSE keywords.next_run_at END""", row,
+                                        THEN now() ELSE keywords.next_run_at END""",
+                    row,
                 )
-        return self.execute("SELECT * FROM keywords WHERE enabled AND next_run_at<=now() ORDER BY next_run_at,id").fetchall()
+        return self.execute(
+            "SELECT * FROM keywords WHERE enabled AND next_run_at<=now() ORDER BY next_run_at,id"
+        ).fetchall()
 
     def schedule_keyword(self, key, due, success):
-        self.execute("UPDATE keywords SET next_run_at=%s, failures=CASE WHEN %s THEN 0 ELSE failures+1 END WHERE id=%s",
-                     (due, success, key))
+        self.execute(
+            "UPDATE keywords SET next_run_at=%s, failures=CASE WHEN %s THEN 0 ELSE failures+1 END WHERE id=%s",
+            (due, success, key),
+        )
 
     def ingest(self, keyword, rows):
         inserted = set()
         with self.conn.transaction():
             for row in rows:
-                current = self.execute("SELECT id FROM channels WHERE id=%s FOR UPDATE", (row["id"],)).fetchone()
+                current = self.execute(
+                    "SELECT id FROM channels WHERE id=%s FOR UPDATE", (row["id"],)
+                ).fetchone()
                 if current is None and row["selection"] == "Qualified":
                     inserted.add(row["id"])
                 self.execute(
@@ -112,7 +144,12 @@ class Database:
                        ON CONFLICT (id) DO UPDATE SET metadata=excluded.metadata, metadata_at=now(),
                          selection=excluded.selection, selection_reason=excluded.selection_reason,
                          sheet_revision=channels.sheet_revision+1""",
-                    (row["id"], Jsonb(row["metadata"]), row["selection"], row["reason"]),
+                    (
+                        row["id"],
+                        Jsonb(row["metadata"]),
+                        row["selection"],
+                        row["reason"],
+                    ),
                 )
                 self.execute(
                     """INSERT INTO channel_matches (channel_id,keyword_id,video_id) VALUES (%s,%s,%s)
@@ -125,12 +162,17 @@ class Database:
     def drafting_queue(self, limit):
         return self.execute(
             """SELECT * FROM channels WHERE selection='Qualified' AND metadata_at>now()-interval '29 days'
-               AND draft_due<=now() ORDER BY draft_due,id LIMIT %s""", (limit,),
+               AND draft_due<=now() ORDER BY draft_due,id LIMIT %s""",
+            (limit,),
         ).fetchall()
 
-    def save_draft(self, channel_id, recipient, output, draft_fingerprint, provider, model):
+    def save_draft(
+        self, channel_id, recipient, output, draft_fingerprint, provider, model
+    ):
         with self.conn.transaction():
-            channel = self.execute("SELECT id FROM channels WHERE id=%s FOR UPDATE", (channel_id,)).fetchone()
+            channel = self.execute(
+                "SELECT id FROM channels WHERE id=%s FOR UPDATE", (channel_id,)
+            ).fetchone()
             if not channel:
                 raise ApiError("drafting", "lead_missing")
             current = self.latest_draft(channel_id)
@@ -140,14 +182,26 @@ class Database:
             self.execute(
                 """INSERT INTO drafts (id,channel_id,recipient,subject,body,evidence_ids,fingerprint,provider,model,review_token)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (draft_id, channel_id, recipient, output.subject, output.body, Jsonb(output.evidence_ids),
-                 draft_fingerprint, provider, model, secrets.token_urlsafe(24)),
+                (
+                    draft_id,
+                    channel_id,
+                    recipient,
+                    output.subject,
+                    output.body,
+                    Jsonb(output.evidence_ids),
+                    draft_fingerprint,
+                    provider,
+                    model,
+                    secrets.token_urlsafe(24),
+                ),
             )
             return draft_id
 
     def latest_draft(self, channel_id):
-        return self.execute("SELECT * FROM drafts WHERE channel_id=%s ORDER BY created_at DESC,id DESC LIMIT 1",
-                            (channel_id,)).fetchone()
+        return self.execute(
+            "SELECT * FROM drafts WHERE channel_id=%s ORDER BY created_at DESC,id DESC LIMIT 1",
+            (channel_id,),
+        ).fetchone()
 
     def draft_result(self, channel_id, contact, source, contact_status, status, due):
         self.execute(
@@ -173,8 +227,10 @@ class Database:
                    contact_email=NULL,contact_source=NULL,contact_status='Unchecked'
                    WHERE metadata<>'{}'::jsonb AND metadata_at<=now()-interval '29 days'""",
             )
-            self.execute("""UPDATE channel_matches SET video_id=NULL
-                            WHERE video_id IS NOT NULL AND matched_at<=now()-interval '29 days'""")
+            self.execute(
+                """UPDATE channel_matches SET video_id=NULL
+                            WHERE video_id IS NOT NULL AND matched_at<=now()-interval '29 days'"""
+            )
 
     def pending_channels(self, limit):
         return self.execute(
@@ -188,11 +244,15 @@ class Database:
                LEFT JOIN LATERAL (SELECT * FROM drafts WHERE channel_id=c.id ORDER BY created_at DESC,id DESC LIMIT 1) d ON true
                LEFT JOIN LATERAL (SELECT * FROM send_attempts WHERE channel_id=c.id
                                   ORDER BY (status<>'Rejected') DESC,claimed_at DESC LIMIT 1) s ON true
-               WHERE c.sheet_synced<c.sheet_revision ORDER BY c.id LIMIT %s""", (limit,),
+               WHERE c.sheet_synced<c.sheet_revision ORDER BY c.id LIMIT %s""",
+            (limit,),
         ).fetchall()
 
     def acknowledge_channel(self, channel_id, revision):
-        self.execute("UPDATE channels SET sheet_synced=GREATEST(sheet_synced,%s) WHERE id=%s", (revision, channel_id))
+        self.execute(
+            "UPDATE channels SET sheet_synced=GREATEST(sheet_synced,%s) WHERE id=%s",
+            (revision, channel_id),
+        )
 
     def pending_runs(self, limit):
         return self.execute(
@@ -203,18 +263,23 @@ class Database:
     def enable_sender(self, enabled):
         with self.conn.transaction():
             self.lock_transaction("delivery")
-            self.execute("UPDATE sender_control SET paused=%s WHERE singleton", (not enabled,))
+            self.execute(
+                "UPDATE sender_control SET paused=%s WHERE singleton", (not enabled,)
+            )
 
     def import_approvals(self, approvals):
         with self.conn.transaction():
             self.lock_transaction("delivery")
-            self.execute("UPDATE approvals SET revoked_at=now() WHERE revoked_at IS NULL AND NOT (draft_id=ANY(%s))",
-                         (list(approvals),))
+            self.execute(
+                "UPDATE approvals SET revoked_at=now() WHERE revoked_at IS NULL AND NOT (draft_id=ANY(%s))",
+                (list(approvals),),
+            )
             for draft_id, decision in approvals.items():
                 self.execute(
                     """INSERT INTO approvals (draft_id,eligibility_evidence)
                        SELECT id,%s FROM drafts WHERE id=%s AND review_token=%s
-                       ON CONFLICT (draft_id) DO NOTHING""", (decision["evidence"], draft_id, decision["token"]),
+                       ON CONFLICT (draft_id) DO NOTHING""",
+                    (decision["evidence"], draft_id, decision["token"]),
                 )
                 self.execute(
                     """UPDATE approvals SET revoked_at=now() WHERE draft_id=%s AND revoked_at IS NULL
@@ -242,10 +307,15 @@ class Database:
     def claim(self, draft_id, days, cap):
         with self.conn.transaction():
             self.lock_transaction("delivery")
-            if self.execute("SELECT paused FROM sender_control WHERE singleton").fetchone()["paused"]:
+            if self.execute(
+                "SELECT paused FROM sender_control WHERE singleton"
+            ).fetchone()["paused"]:
                 return None
-            self.execute("""SELECT c.id FROM channels c JOIN drafts d ON d.channel_id=c.id
-                            WHERE d.id=%s FOR UPDATE OF c""", (draft_id,)).fetchone()
+            self.execute(
+                """SELECT c.id FROM channels c JOIN drafts d ON d.channel_id=c.id
+                            WHERE d.id=%s FOR UPDATE OF c""",
+                (draft_id,),
+            ).fetchone()
             count = self.execute(
                 """SELECT count(*) AS count FROM send_attempts
                    WHERE (claimed_at AT TIME ZONE 'UTC')::date=(now() AT TIME ZONE 'UTC')::date"""
@@ -268,7 +338,10 @@ class Database:
                 (status, gmail_id, reason, draft_id),
             ).fetchone()
             if row:
-                self.execute("UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id=%s", (row["channel_id"],))
+                self.execute(
+                    "UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id=%s",
+                    (row["channel_id"],),
+                )
 
     def expire_claims(self):
         with self.conn.transaction():
@@ -290,10 +363,15 @@ class Database:
             ).fetchone()
             if not row:
                 raise ApiError("sender", "no_uncertain_send_for_draft")
-            self.execute("UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id=%s", (row["channel_id"],))
+            self.execute(
+                "UPDATE channels SET sheet_revision=sheet_revision+1 WHERE id=%s",
+                (row["channel_id"],),
+            )
 
     def suppress(self, recipient):
         with self.conn.transaction():
             self.lock_transaction("delivery")
-            self.execute("INSERT INTO suppressions (normalized_recipient) VALUES (%s) ON CONFLICT DO NOTHING",
-                         (recipient,))
+            self.execute(
+                "INSERT INTO suppressions (normalized_recipient) VALUES (%s) ON CONFLICT DO NOTHING",
+                (recipient,),
+            )

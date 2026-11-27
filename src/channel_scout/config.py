@@ -43,8 +43,10 @@ class Settings:
             "host": self.get("POSTGRES_HOST", "127.0.0.1"),
             "port": self.integer("POSTGRES_PORT", 5432, 1, 65535),
             "dbname": self.get("POSTGRES_DB", "channel_scout"),
-            "user": (self.get("POSTGRES_MIGRATION_USER") if maintenance else "") or self.require("POSTGRES_USER"),
-            "password": (self.get("POSTGRES_MIGRATION_PASSWORD") if maintenance else "") or self.require("POSTGRES_PASSWORD"),
+            "user": (self.get("POSTGRES_MIGRATION_USER") if maintenance else "")
+            or self.require("POSTGRES_USER"),
+            "password": (self.get("POSTGRES_MIGRATION_PASSWORD") if maintenance else "")
+            or self.require("POSTGRES_PASSWORD"),
             "connect_timeout": 5,
             "application_name": "channelscout",
         }
