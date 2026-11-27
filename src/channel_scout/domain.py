@@ -3,8 +3,11 @@ import json
 import re
 from datetime import datetime, timedelta
 from typing import Literal
+from unicodedata import normalize
 
+import pycountry
 from pydantic import BaseModel, ConfigDict, Field
+
 
 CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}\Z")
 BUSINESS_EMAIL = re.compile(
@@ -12,17 +15,14 @@ BUSINESS_EMAIL = re.compile(
     r"(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)*\.[A-Z]{2,24}(?![\w-])",
     re.I | re.ASCII,
 )
-BUSINESS_CONTEXT = re.compile(
-    r"\b(business|contact|inquiries|enquiries|sponsor\w*|collab\w*|partnership\w*)\b",
-    re.I,
-)
+BUSINESS_CONTEXT = re.compile(r"\b(business|contact|inquiries|enquiries|sponsor\w*|collab\w*|partnership\w*)\b", re.I)
 URL = re.compile(r"https?://[^\s<>\x22]+", re.I)
+DEFAULT_EXCLUSIONS = ("BD", "IN", "PK")
+COUNTRY_ALIASES = {"uk": "GB", "uae": "AE", "usa": "US", "south korea": "KR", "north korea": "KP"}
 
 
 def fingerprint(*values) -> str:
-    return hashlib.sha256(
-        json.dumps(values, ensure_ascii=False, sort_keys=True).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(values, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
 def text(value, limit: int) -> str:
@@ -31,20 +31,112 @@ def text(value, limit: int) -> str:
 
 def normalize_email(value: str) -> str:
     normalized = value.strip().lower()
-    if (
-        len(normalized) > 254
-        or not BUSINESS_EMAIL.fullmatch(normalized)
-        or ".." in normalized
-    ):
+    if len(normalized) > 254 or not BUSINESS_EMAIL.fullmatch(normalized) or ".." in normalized:
         raise ValueError("invalid email address")
     return normalized
 
 
+def country_code(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if value.casefold() in COUNTRY_ALIASES:
+        return COUNTRY_ALIASES[value.casefold()]
+    try:
+        return pycountry.countries.lookup(value).alpha_2
+    except LookupError:
+        raise ValueError("unrecognized country") from None
+
+
+def subscriber_bound(value, default):
+    if value is None or str(value).strip() == "":
+        return default
+    if isinstance(value, bool):
+        raise ValueError("subscriber bound must be a whole number")
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    number = str(value).strip().replace(",", "")
+    if not re.fullmatch(r"[0-9]{1,12}", number):
+        raise ValueError("subscriber bound must be a nonnegative whole number")
+    return int(number)
+
+
+def read_criteria(row: dict) -> dict:
+    country = country_code(str(row.get("country") or ""))
+    city = text(row.get("city / town"), 100)
+    mode = str(row.get("location policy") or "review uncertain").strip().lower()
+    if mode not in {"review uncertain", "confirmed only"}:
+        raise ValueError("invalid location policy")
+    low = subscriber_bound(row.get("min subscribers"), 1_000)
+    high = subscriber_bound(row.get("max subscribers"), 1_000_000)
+    if low > high:
+        raise ValueError("minimum exceeds maximum")
+    raw = str(row.get("excluded countries") or "").strip()
+    if not raw:
+        excluded = sorted(set(DEFAULT_EXCLUSIONS) - {country})
+    elif raw.casefold() == "none":
+        excluded = []
+    else:
+        excluded = sorted({country_code(entry) for entry in raw.split(",") if entry.strip()})
+        if not excluded or country in excluded:
+            raise ValueError("invalid or contradictory country exclusions")
+    options = {}
+    for name, value, default in (
+        ("country", country, ""), ("city", city, ""), ("location_policy", mode, "review uncertain"),
+        ("min_subscribers", low, 1_000), ("max_subscribers", high, 1_000_000),
+        ("excluded_countries", excluded, list(DEFAULT_EXCLUSIONS)),
+    ):
+        if value != default:
+            options[name] = value
+    return options
+
+
+def place_text(value: str) -> str:
+    return " ".join(normalize("NFKC", value).casefold().replace("’", "'").split())
+
+
+def search_topic(query: str, criteria: dict) -> str:
+    country = pycountry.countries.get(alpha_2=criteria.get("country", ""))
+    parts = [query]
+    for place in (criteria.get("city", ""), country.name if country else ""):
+        if place and not re.search(rf"(?<!\w){re.escape(place_text(place))}(?!\w)", place_text(" ".join(parts))):
+            parts.append(place)
+    return " ".join(parts)
+
+
+def location_result(country: str, description: str, criteria: dict) -> tuple[str, str]:
+    target, city = criteria.get("country"), criteria.get("city")
+    if target and country and country != target:
+        return "Outside target", "country_mismatch"
+    if target and country != target:
+        return "Unverified", "country_not_confirmed"
+    if city:
+        place = re.escape(place_text(city))
+        explicit = (rf"^(?:(?:we are|we're|i am|i'm|our (?:team|channel|studio) is)\s+)?"
+                    rf"(?:based|located|headquartered)\s+in\s+{place}(?!\w)")
+        for sentence in re.split(r"[.!?\n]+", description):
+            wording = place_text(sentence)
+            if re.search(explicit, wording) and not re.search(r"\b(?:until|formerly|previously)\b", wording):
+                return "City stated", "explicit_city_statement"
+        return "Unverified", "city_not_confirmed"
+    if target:
+        return "Country matches", "channel_country_matches"
+    return "Any location", ""
+
+
+def lead_priority(selection: str, contact: str, draft: str) -> str:
+    if selection == "Excluded":
+        return "Excluded"
+    if selection == "Needs Review":
+        return "Review"
+    if contact == "Verified public contact" and draft == "Pending Approval":
+        return "High"
+    return "Standard"
+
+
 def parse_keywords(rows: list[list]) -> tuple[list[dict], int]:
     names = [str(field).strip().lower() for field in rows[0]] if rows else []
-    if len(set(names)) != len(names) or not {"niche", "keyword", "enabled"} <= set(
-        names
-    ):
+    if len(set(names)) != len(names) or not {"niche", "keyword", "enabled"} <= set(names):
         raise ValueError("missing or duplicate Keywords headers")
     records = {}
     invalid = 0
@@ -59,30 +151,28 @@ def parse_keywords(rows: list[list]) -> tuple[list[dict], int]:
         query = text(row.get("keyword"), 200)
         mode = str(row.get("search mode") or "channel").strip().lower()
         mode = {"channel search": "channel", "video search": "video"}.get(mode, mode)
-        if (
-            enabled not in {"true", "yes", "1"}
-            or not niche
-            or not query
-            or mode not in {"channel", "video"}
-        ):
+        if enabled not in {"true", "yes", "1"} or not niche or not query or mode not in {"channel", "video"}:
+            invalid += 1
+            continue
+        try:
+            criteria = read_criteria(row)
+        except ValueError:
             invalid += 1
             continue
         target = text(row.get("target format"), 60)
-        key = fingerprint(niche.casefold(), query.casefold(), mode)
-        records[key] = dict(
-            id=key, niche=niche, query=query, mode=mode, target_format=target
-        )
+        identity = (niche.casefold(), query.casefold(), mode)
+        key = fingerprint(*identity, criteria) if criteria else fingerprint(*identity)
+        records[key] = dict(id=key, niche=niche, query=query, mode=mode, target_format=target, criteria=criteria)
     return list(records.values()), invalid
 
 
-def classify(
-    subscribers, hidden: bool, country: str, activity: str, activity_enabled: bool
-) -> tuple[str, str]:
-    if country.upper() in {"IN", "PK", "BD"}:
+def classify(subscribers, hidden: bool, country: str, activity: str, activity_enabled: bool, criteria=None) -> tuple[str, str]:
+    criteria = criteria or {}
+    if country.upper() in criteria.get("excluded_countries", DEFAULT_EXCLUSIONS):
         return "Excluded", "excluded_country"
     if hidden or subscribers is None:
         return "Needs Review", "subscriber_count_unknown"
-    if not 1_000 <= subscribers <= 1_000_000:
+    if not criteria.get("min_subscribers", 1_000) <= subscribers <= criteria.get("max_subscribers", 1_000_000):
         return "Excluded", "subscriber_count_out_of_range"
     if activity_enabled and activity == "Inactive":
         return "Excluded", "no_recent_uploads"
@@ -108,7 +198,7 @@ def classify_activity(publications: list[str], complete: bool, now: datetime) ->
 def business_emails(content: str, trusted_contact_page: bool = False) -> set[str]:
     result = set()
     for match in BUSINESS_EMAIL.finditer(content):
-        context = content[max(0, match.start() - 100) : match.end() + 50]
+        context = content[max(0, match.start() - 100):match.end() + 50]
         if trusted_contact_page or BUSINESS_CONTEXT.search(context):
             try:
                 result.add(normalize_email(match.group()))
@@ -132,9 +222,7 @@ def validate_draft(raw: str, evidence: dict[str, str]) -> DraftOutput:
             raise ValueError("invalid_abstention")
         return result
     if (
-        not result.subject.strip()
-        or not result.body.strip()
-        or not result.evidence_ids
+        not result.subject.strip() or not result.body.strip() or not result.evidence_ids
         or any(character in result.subject for character in "\r\n\x00")
         or any(ord(c) < 32 and c not in "\r\n\t" for c in result.body)
         or not set(result.evidence_ids) <= evidence.keys()

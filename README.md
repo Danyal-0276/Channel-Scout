@@ -34,6 +34,8 @@ ChannelScout Agent turns keywords in Google Sheets into a deduplicated list of Y
 
 The optional 90-day activity filter is disabled by default. Channels with hidden or unavailable subscriber counts go to review.
 
+Add a country, city or town, or custom subscriber bounds to a keyword row to narrow or broaden that search. Leads show the target area, match evidence category, and priority. Green rows have a verified public contact and a draft, blue rows are qualified and need more work, and amber rows need review. [Location and priority rules](docs/location-and-outreach.md)
+
 <a name="scout-quick-start"></a>
 <h2 align="center">Quick start</h2>
 
@@ -90,5 +92,6 @@ Run `python -m pytest -q` in the virtual environment. PostgreSQL integration tes
 <h2 align="center">Project docs</h2>
 
 - [Operator runbook](docs/operations.md) for credentials, local setup, scheduling, and recovery.
+- [Location targeting and outreach review](docs/location-and-outreach.md) for search criteria, lead colors, and Excel export.
 - [Production architecture](docs/production-architecture.md) for workflows, guardrails, fallbacks, and release gates.
 - [Implementation plan](docs/implementation-plan.md) for project structure and database design.

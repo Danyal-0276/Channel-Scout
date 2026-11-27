@@ -1,8 +1,34 @@
+import csv
 import secrets
 from uuid import UUID
 
 from .domain import normalize_email
-from .integrations import ApiError, LEAD_HEADERS
+from .integrations import ApiError, LEAD_HEADERS, LEAD_LAST
+from .sheets_sync import lead_row
+
+
+REVIEW_COLUMNS = (
+    "Priority", "Channel", "Channel URL", "Target Area", "Location Match", "Contact Email",
+    "Contact Source URL", "Subject", "Draft Body", "Draft ID", "Review Decision", "Notes",
+)
+
+
+def outreach_review_rows(db):
+    for lead in db.pending_channels(None, export=True):
+        record = dict(zip(LEAD_HEADERS, lead_row(lead)))
+        if record["Outreach Status"] == "Pending Approval":
+            yield {field: record.get(field, "") for field in REVIEW_COLUMNS}
+
+
+def export_review_csv(db, path):
+    rows = list(outreach_review_rows(db))
+    with path.open("x", encoding="utf-8-sig", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=REVIEW_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: "'" + value if value.lstrip()[:1] in {"=", "+", "-", "@"} else value
+                             for field, value in row.items()})
+    return len(rows)
 
 
 def decisions(rows):
@@ -21,12 +47,8 @@ def decisions(rows):
             continue
         token, decision, evidence = fields
         value = {"token": token, "evidence": evidence}
-        if (
-            decision != "Approve"
-            or not token
-            or not 5 <= len(evidence) <= 1000
-            or (draft_id in approved and approved[draft_id] != value)
-        ):
+        if (decision != "Approve" or not token or not 5 <= len(evidence) <= 1000
+                or (draft_id in approved and approved[draft_id] != value)):
             blocked.add(draft_id)
         else:
             approved[draft_id] = value
@@ -34,7 +56,7 @@ def decisions(rows):
 
 
 def reviewed_snapshot(sheets, draft, decision):
-    rows = sheets.rows("'Leads'!A1:W")
+    rows = sheets.rows(f"'Leads'!A1:{LEAD_LAST}")
     if not rows or rows[0] != LEAD_HEADERS:
         raise ApiError("sheets", "unexpected_headers")
     matches = [row for row in rows[1:] if row and row[0] == draft["channel_id"]]
@@ -46,16 +68,11 @@ def reviewed_snapshot(sheets, draft, decision):
     except ValueError:
         return False
     return (
-        valid_recipient
-        and row.get("Selection Status") == "Qualified"
+        valid_recipient and row.get("Selection Status") == "Qualified"
         and row.get("Contact Email") == draft["recipient"]
-        and row.get("Subject") == draft["subject"]
-        and row.get("Draft Body") == draft["body"]
-        and row.get("Draft ID") == str(draft["id"])
-        and row.get("Review Token") == draft["review_token"]
-        and secrets.compare_digest(
-            decision["token"].encode(), draft["review_token"].encode()
-        )
+        and row.get("Subject") == draft["subject"] and row.get("Draft Body") == draft["body"]
+        and row.get("Draft ID") == str(draft["id"]) and row.get("Review Token") == draft["review_token"]
+        and secrets.compare_digest(decision["token"].encode(), draft["review_token"].encode())
     )
 
 
@@ -81,9 +98,7 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
         headers = gmail.token.headers()
         current = decisions(sheets.verified_approvals())
         db.import_approvals(current)
-        if current.get(draft_id) != decision or not reviewed_snapshot(
-            sheets, draft, decision
-        ):
+        if current.get(draft_id) != decision or not reviewed_snapshot(sheets, draft, decision):
             report["blocked"] = report.get("blocked", 0) + 1
             continue
         claim = db.claim(draft_id, days, cap)
@@ -96,11 +111,7 @@ def run_sender(db, sheets, gmail, live, cap, days, report):
             gmail_id = gmail.submit(approved_draft, message_id, headers)
         except ApiError as error:
             definitive = error.status in {400, 401, 403, 404, 429}
-            db.finish_send(
-                draft_id,
-                "Rejected" if definitive else "Needs Review",
-                reason=error.code,
-            )
+            db.finish_send(draft_id, "Rejected" if definitive else "Needs Review", reason=error.code)
             metric = "rejected" if definitive else "uncertain"
             report[metric] = report.get(metric, 0) + 1
             # Pause this run on auth, quota, transient provider, or ambiguous failures.

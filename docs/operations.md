@@ -28,6 +28,8 @@ The database provisioning helper is one-time and limited to a local `channel_sco
 
 `setup-sheets` validates the existing header prefix and completes `Leads` and `Run Log`. Keep those two tabs as application-owned projections. Use filter views to sort and filter during processing. Structural changes or physical sorts during projection writes can race with Google Sheets row updates. The job verifies stable IDs and checks for duplicate IDs. Keep the original `Keywords` headers `Niche`, `Keyword`, `Enabled`. Optional `Search Mode` and `Target Format` fields are accepted. Channel search is the default.
 
+The same command installs the optional country, city or town, subscriber range, and location policy fields and the lead priority colors. See [location targeting and outreach review](location-and-outreach.md). Use `draft --refresh` to recheck current pending drafts after updating messaging guidance.
+
 The 90-day activity calculation is disabled by default while YouTube policy treatment and which formats count are confirmed. The Recent Activity column displays available source publication dates in that mode. Content and upload formats remain `Unknown` when the available evidence does not support a label. `CHANNELSCOUT_CONTACT_DOMAINS` accepts a comma-separated list of verified creator-owned HTTPS hostnames for optional off-site contact enrichment. The YouTube description route runs without this list.
 
 To enter reviewed format labels, run `label-format <channel-id> --content 'Podcast, Interview' --upload 'Live replay' --evidence 'Creator-provided format confirmation'` through the CLI. The next sync projects both labels separately.

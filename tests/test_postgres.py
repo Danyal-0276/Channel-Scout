@@ -171,6 +171,27 @@ def test_quota_bucket_blocks_at_configured_cap(postgres):
 
 
 @pytest.mark.postgres
+def test_each_area_has_an_independent_match_and_disabling_a_row_recomputes_priority(postgres):
+    db, _ = postgres
+    toronto = {"id": "toronto", "niche": "Property", "query": "Podcast", "mode": "channel",
+               "target_format": "", "criteria": {"country": "CA", "city": "Toronto"}}
+    seattle = {**toronto, "id": "seattle", "criteria": {"country": "US", "city": "Seattle"}}
+    db.keywords([toronto, seattle])
+    channel_id = "UC" + "E" * 22
+    channel = lead(channel_id)
+    db.ingest(toronto, [{**channel, "reason": "explicit_city_statement", "location_match": "City stated"}])
+    db.ingest(seattle, [{**channel, "selection": "Excluded", "reason": "country_mismatch",
+                         "location_match": "Outside target"}])
+    entries = db.pending_channels(10)
+    assert len(entries) == 1 and entries[0]["selection"] == "Qualified"
+    assert {match["location_match"] for match in entries[0]["matches"]} == {"City stated", "Outside target"}
+    db.keywords([seattle])
+    entries = db.pending_channels(10)
+    assert entries[0]["selection"] == "Excluded"
+    assert [match["criteria"]["city"] for match in entries[0]["matches"]] == ["Seattle"]
+
+
+@pytest.mark.postgres
 def test_full_workflow_requires_matching_approval_and_keeps_uncertainty(postgres):
     db, _ = postgres
     sheet = SheetFixture()
